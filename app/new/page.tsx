@@ -4,24 +4,21 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, Button, PlatformIcon } from "@/components/ui";
 import { Icon, type IconName } from "@/components/Icon";
-import { PLATFORM_META, MODE_META, REGIONS } from "@/lib/meta";
-import type { Platform, AuditMode, Audit } from "@/lib/types";
+import { PLATFORM_META, REGIONS } from "@/lib/meta";
+import type { Platform, Audit } from "@/lib/types";
 import { itemsForPlatform } from "@/lib/checklist";
 import { generateResults } from "@/lib/mock";
 import { addAudit } from "@/lib/store";
 import { cx } from "@/lib/format";
 
 const PLATFORMS: Platform[] = ["android", "ios", "web"];
-const APP_MODES: AuditMode[] = ["api", "upload", "cli"];
-const WEB_MODES: AuditMode[] = ["api", "url", "upload"];
 
 export default function NewAuditPage() {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [platform, setPlatform] = useState<Platform | null>(null);
-  const [mode, setMode] = useState<AuditMode | null>(null);
 
-  // inputs
+  // inputs (all mandatory)
   const [name, setName] = useState("");
   const [region, setRegion] = useState("in1");
   const [accountId, setAccountId] = useState("");
@@ -31,51 +28,38 @@ export default function NewAuditPage() {
   const [fileName, setFileName] = useState("");
   const [running, setRunning] = useState(false);
 
-  const modes = platform === "web" ? WEB_MODES : APP_MODES;
+  const isWeb = platform === "web";
 
   function target(): string {
-    if (mode === "api") return accountId ? maskId(accountId) : "API account";
-    if (mode === "url") return url || "—";
-    if (mode === "upload") return fileName || "—";
-    if (mode === "cli") return fileName || "report.json";
-    return "—";
+    if (isWeb) return url || "—";
+    return `${accountId ? maskId(accountId) : "account"} · ${fileName || "binary"}`;
   }
 
-  const canContinue =
-    step === 0
-      ? !!platform
-      : step === 1
-        ? !!mode
-        : step === 2
-          ? inputsValid()
-          : true;
-
-  function inputsValid() {
+  function detailsValid() {
     if (!name.trim()) return false;
-    if (mode === "api") return accountId.trim().length > 2 && passcode.length > 2;
-    if (mode === "url") return /^https?:\/\/.+/.test(url.trim());
-    if (mode === "upload") return !!fileName;
-    if (mode === "cli") return !!fileName;
-    return false;
+    if (accountId.trim().length < 3 || passcode.length < 3) return false;
+    if (isWeb) return /^https?:\/\/.+/.test(url.trim());
+    return !!fileName;
   }
+
+  const canContinue = step === 0 ? !!platform : step === 1 ? detailsValid() : true;
 
   function run() {
-    if (!platform || !mode) return;
+    if (!platform) return;
     setRunning(true);
     const id = "aud_" + Math.random().toString(36).slice(2, 9);
     const audit: Audit = {
       id,
       name: name.trim(),
       platform,
-      mode,
-      region: mode === "api" ? region : undefined,
+      mode: "full",
+      region,
       target: target(),
       createdAt: Date.now(),
       status: "completed",
       submittedBy: "you@clevertap.com",
-      results: generateResults(id, platform, mode),
+      results: generateResults(id, platform, "full"),
     };
-    // simulate analysis time
     setTimeout(() => {
       addAudit(audit);
       router.push(`/audit/${id}`);
@@ -89,33 +73,24 @@ export default function NewAuditPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight">New audit</h1>
         <p className="mt-1 text-sm text-muted">
-          Set up an integration check. This preview generates sample results —
-          no data is sent anywhere.
+          Credentials + {isWeb ? "URL" : "binary"} are required — the backend runs
+          every engine in one pass. This preview generates sample results.
         </p>
       </div>
 
-      <Stepper
-        step={step}
-        labels={["Platform", "Method", "Details", "Review"]}
-      />
+      <Stepper step={step} labels={["Platform", "Credentials & source", "Review"]} />
 
       <Card className="mt-6 p-6">
         {/* STEP 0: platform */}
         {step === 0 && (
           <div className="animate-fade-in">
-            <StepHeading
-              title="What are you auditing?"
-              sub="Pick the platform of the integration."
-            />
+            <StepHeading title="What are you auditing?" sub="Pick the platform." />
             <div className="grid gap-3 sm:grid-cols-3">
               {PLATFORMS.map((p) => (
                 <ChoiceCard
                   key={p}
                   selected={platform === p}
-                  onClick={() => {
-                    setPlatform(p);
-                    setMode(null);
-                  }}
+                  onClick={() => setPlatform(p)}
                   icon={PLATFORM_META[p].icon as IconName}
                   title={PLATFORM_META[p].label}
                   desc={PLATFORM_META[p].targetLabel}
@@ -125,69 +100,54 @@ export default function NewAuditPage() {
           </div>
         )}
 
-        {/* STEP 1: mode */}
+        {/* STEP 1: mandatory details */}
         {step === 1 && platform && (
-          <div className="animate-fade-in">
-            <StepHeading
-              title="How should we check it?"
-              sub="The API method has the highest coverage and needs no source code."
-            />
-            <div className="grid gap-3">
-              {modes.map((m) => (
-                <ModeRow
-                  key={m}
-                  selected={mode === m}
-                  onClick={() => setMode(m)}
-                  mode={m}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* STEP 2: details */}
-        {step === 2 && platform && mode && (
           <div className="animate-fade-in space-y-5">
             <StepHeading
-              title="Details"
-              sub={`${itemCount} checklist items will be evaluated for ${PLATFORM_META[platform].label}.`}
+              title="Credentials & source"
+              sub={`All fields required. ${itemCount} checklist items will be evaluated.`}
             />
             <Field label="Audit name">
               <input
                 autoFocus
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. ShopMate — Android"
+                placeholder={`e.g. ShopMate — ${PLATFORM_META[platform].label}`}
                 className="input"
               />
             </Field>
 
-            {mode === "api" && (
-              <>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Region">
-                    <select
-                      value={region}
-                      onChange={(e) => setRegion(e.target.value)}
-                      className="input"
-                    >
-                      {REGIONS.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.label}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Account ID">
-                    <input
-                      value={accountId}
-                      onChange={(e) => setAccountId(e.target.value)}
-                      placeholder="e.g. W8R-K6R-XXXX"
-                      className="input font-mono"
-                    />
-                  </Field>
-                </div>
-                <Field label="Passcode (read-only)">
+            {/* Credentials block — always required */}
+            <div className="rounded-xl border bg-surface-2 p-4">
+              <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                <Icon name="key" size={16} className="text-accent" />
+                CleverTap account (read-only)
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Region">
+                  <select
+                    value={region}
+                    onChange={(e) => setRegion(e.target.value)}
+                    className="input"
+                  >
+                    {REGIONS.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Account ID">
+                  <input
+                    value={accountId}
+                    onChange={(e) => setAccountId(e.target.value)}
+                    placeholder="W8R-K6R-XXXX"
+                    className="input font-mono"
+                  />
+                </Field>
+              </div>
+              <div className="mt-4">
+                <Field label="Passcode">
                   <div className="relative">
                     <input
                       type={showPass ? "text" : "password"}
@@ -206,14 +166,11 @@ export default function NewAuditPage() {
                     </button>
                   </div>
                 </Field>
-                <SecurityNote>
-                  The passcode is never stored — in the real tool it is used for
-                  the job in memory and discarded. All calls run server-side.
-                </SecurityNote>
-              </>
-            )}
+              </div>
+            </div>
 
-            {mode === "url" && (
+            {/* Source block */}
+            {isWeb ? (
               <Field label="Website URL">
                 <input
                   value={url}
@@ -222,61 +179,52 @@ export default function NewAuditPage() {
                   className="input font-mono"
                 />
               </Field>
+            ) : (
+              <Field label={`Upload ${PLATFORM_META[platform].targetLabel}`}>
+                <Dropzone
+                  accept={PLATFORM_META[platform].accept}
+                  fileName={fileName}
+                  onFile={setFileName}
+                  hint={PLATFORM_META[platform].accept}
+                />
+              </Field>
             )}
 
-            {(mode === "upload" || mode === "cli") && (
-              <>
-                {mode === "cli" && (
-                  <div className="rounded-xl border bg-surface-2 p-4">
-                    <div className="mb-2 text-xs font-medium text-muted">
-                      1 · Run locally (binary never leaves your machine)
-                    </div>
-                    <CodeLine text={`npx ct-audit scan ./${platform === "web" ? "site" : "app"} --out report.json`} />
-                    <div className="mt-3 mb-2 text-xs font-medium text-muted">
-                      2 · Upload the generated report
-                    </div>
-                    <Dropzone
-                      accept=".json"
-                      fileName={fileName}
-                      onFile={setFileName}
-                      hint="report.json"
-                    />
-                  </div>
-                )}
-                {mode === "upload" && (
-                  <Field label={`Upload ${PLATFORM_META[platform].targetLabel}`}>
-                    <Dropzone
-                      accept={PLATFORM_META[platform].accept}
-                      fileName={fileName}
-                      onFile={setFileName}
-                      hint={PLATFORM_META[platform].accept}
-                    />
-                    <p className="mt-2 text-xs text-muted">
-                      Files are auto-deleted after analysis in the real tool.
-                    </p>
-                  </Field>
-                )}
-              </>
-            )}
+            <SecurityNote>
+              The passcode is never stored — used for the job in memory and
+              discarded. Uploaded binaries are auto-deleted after analysis; all API
+              calls run server-side.
+            </SecurityNote>
           </div>
         )}
 
-        {/* STEP 3: review */}
-        {step === 3 && platform && mode && (
+        {/* STEP 2: review */}
+        {step === 2 && platform && (
           <div className="animate-fade-in">
             <StepHeading title="Review & run" sub="Confirm the setup below." />
             <div className="divide-y rounded-xl border">
               <ReviewRow label="Name" value={name} />
               <ReviewRow label="Platform" value={PLATFORM_META[platform].label} />
-              <ReviewRow label="Method" value={MODE_META[mode].label} />
-              {mode === "api" && (
-                <ReviewRow
-                  label="Region"
-                  value={REGIONS.find((r) => r.id === region)?.label ?? region}
-                />
-              )}
-              <ReviewRow label="Target" value={target()} mono />
+              <ReviewRow
+                label="Region"
+                value={REGIONS.find((r) => r.id === region)?.label ?? region}
+              />
+              <ReviewRow label="Account ID" value={maskId(accountId)} mono />
+              <ReviewRow
+                label={isWeb ? "URL" : "Binary"}
+                value={isWeb ? url : fileName}
+                mono
+              />
               <ReviewRow label="Checklist items" value={String(itemCount)} />
+            </div>
+            <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-dashed p-3.5 text-xs leading-relaxed text-muted">
+              <Icon name="info" size={16} className="mt-0.5 shrink-0 text-accent" />
+              <span>
+                After the automated pass, any items that need a real device (killed/
+                background/foreground push, deep-link landing, visual render) appear
+                as a short guided <b className="text-text">Live-device checklist</b> on
+                the report.
+              </span>
             </div>
           </div>
         )}
@@ -292,23 +240,19 @@ export default function NewAuditPage() {
           >
             Back
           </Button>
-          {step < 3 ? (
-            <Button
-              iconRight="arrowRight"
-              disabled={!canContinue}
-              onClick={() => setStep((s) => s + 1)}
-            >
+          {step < 2 ? (
+            <Button iconRight="arrowRight" disabled={!canContinue} onClick={() => setStep((s) => s + 1)}>
               Continue
             </Button>
           ) : (
             <Button icon="zap" onClick={run} disabled={running}>
-              {running ? "Running…" : "Run audit"}
+              {running ? "Running…" : "Run full analysis"}
             </Button>
           )}
         </div>
       </Card>
 
-      {running && <RunningOverlay platform={platform!} mode={mode!} count={itemCount} />}
+      {running && <RunningOverlay platform={platform!} count={itemCount} />}
     </div>
   );
 }
@@ -343,12 +287,7 @@ function Stepper({ step, labels }: { step: number; labels: string[] }) {
             </span>
           </div>
           {i < labels.length - 1 && (
-            <div
-              className={cx(
-                "mx-2 h-px flex-1 transition",
-                i < step ? "bg-brand" : "bg-border",
-              )}
-            />
+            <div className={cx("mx-2 h-px flex-1 transition", i < step ? "bg-brand" : "bg-border")} />
           )}
         </div>
       ))}
@@ -404,57 +343,6 @@ function ChoiceCard({
   );
 }
 
-function ModeRow({
-  selected,
-  onClick,
-  mode,
-}: {
-  selected: boolean;
-  onClick: () => void;
-  mode: AuditMode;
-}) {
-  const m = MODE_META[mode];
-  return (
-    <button
-      onClick={onClick}
-      className={cx(
-        "flex items-center gap-4 rounded-xl border p-4 text-left transition",
-        selected
-          ? "border-brand bg-brand-soft ring-1 ring-brand"
-          : "hover:border-border-strong hover:bg-surface-2",
-      )}
-    >
-      <span
-        className={cx(
-          "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl",
-          selected ? "bg-brand text-brand-fg" : "bg-surface-2 text-text",
-        )}
-      >
-        <Icon name={m.icon as IconName} size={20} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 font-medium">
-          {m.label}
-          {mode === "api" && (
-            <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase text-accent">
-              Recommended
-            </span>
-          )}
-        </div>
-        <div className="text-xs text-muted">{m.desc}</div>
-      </div>
-      <span
-        className={cx(
-          "flex h-5 w-5 items-center justify-center rounded-full border",
-          selected ? "border-brand bg-brand text-brand-fg" : "border-border-strong",
-        )}
-      >
-        {selected && <Icon name="check" size={13} />}
-      </span>
-    </button>
-  );
-}
-
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
@@ -497,66 +385,26 @@ function Dropzone({
         className="hidden"
         onChange={(e) => onFile(e.target.files?.[0]?.name ?? "")}
       />
-      <Icon
-        name={fileName ? "check" : "upload"}
-        size={24}
-        className={fileName ? "text-brand" : "text-muted"}
-      />
-      <div className="mt-2 text-sm font-medium">
-        {fileName || "Click to choose a file"}
-      </div>
+      <Icon name={fileName ? "check" : "upload"} size={24} className={fileName ? "text-brand" : "text-muted"} />
+      <div className="mt-2 text-sm font-medium">{fileName || "Click to choose a file"}</div>
       <div className="mt-0.5 text-xs text-muted">{hint}</div>
     </label>
   );
 }
 
-function CodeLine({ text }: { text: string }) {
-  return (
-    <div className="flex items-center justify-between gap-2 rounded-lg bg-surface-3 px-3 py-2 font-mono text-xs">
-      <span className="truncate">
-        <span className="text-muted-2">$ </span>
-        {text}
-      </span>
-      <Icon name="copy" size={14} className="shrink-0 text-muted" />
-    </div>
-  );
-}
-
-function ReviewRow({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
+function ReviewRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-center justify-between px-4 py-3 text-sm">
       <span className="text-muted">{label}</span>
-      <span className={cx("font-medium", mono && "font-mono text-[13px]")}>
-        {value || "—"}
-      </span>
+      <span className={cx("font-medium", mono && "font-mono text-[13px]")}>{value || "—"}</span>
     </div>
   );
 }
 
-function RunningOverlay({
-  platform,
-  mode,
-  count,
-}: {
-  platform: Platform;
-  mode: AuditMode;
-  count: number;
-}) {
+function RunningOverlay({ platform, count }: { platform: Platform; count: number }) {
   const steps = [
-    mode === "api"
-      ? "Connecting to CleverTap API…"
-      : mode === "url"
-        ? "Loading the page…"
-        : "Unpacking source…",
-    "Running checks…",
+    "Connecting to CleverTap API…",
+    platform === "web" ? "Crawling the site…" : "Unpacking & scanning the binary…",
     `Evaluating ${count} checklist items…`,
     "Building report…",
   ];
@@ -564,15 +412,10 @@ function RunningOverlay({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm animate-fade-in">
       <Card className="w-full max-w-sm p-6 text-center">
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-brand-soft">
-          <span
-            className="h-8 w-8 rounded-full border-[3px] border-brand border-t-transparent animate-spin-slow"
-            style={{ borderTopColor: "transparent" }}
-          />
+          <span className="h-8 w-8 rounded-full border-[3px] border-brand border-t-transparent animate-spin-slow" />
         </div>
-        <h3 className="mt-4 font-semibold">Running audit</h3>
-        <p className="mt-1 text-sm text-muted">
-          {PLATFORM_META[platform].label} · {MODE_META[mode].label}
-        </p>
+        <h3 className="mt-4 font-semibold">Running full analysis</h3>
+        <p className="mt-1 text-sm text-muted">{PLATFORM_META[platform].label}</p>
         <div className="mt-4 space-y-1.5 text-left">
           {steps.map((s, i) => (
             <div
@@ -591,6 +434,7 @@ function RunningOverlay({
 }
 
 function maskId(id: string): string {
+  if (!id) return "account";
   if (id.length <= 4) return "•••" + id;
   return id.slice(0, 3) + "-•••-" + id.slice(-3);
 }

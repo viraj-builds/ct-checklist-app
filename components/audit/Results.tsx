@@ -5,7 +5,15 @@ import { useRouter } from "next/navigation";
 import { useAudit, summarize, setItemStatus, deleteAudit, useMounted } from "@/lib/store";
 import { itemsForPlatform, TIER_LABELS } from "@/lib/checklist";
 import { getFaq } from "@/lib/faq";
-import { PLATFORM_META, MODE_META, STATUS_META, METHOD_META, REGIONS } from "@/lib/meta";
+import {
+  PLATFORM_META,
+  MODE_META,
+  STATUS_META,
+  METHOD_META,
+  REGIONS,
+  LIVE_GUIDE,
+  DOCS_HELP,
+} from "@/lib/meta";
 import type { ChecklistItem, ItemStatus } from "@/lib/types";
 import {
   Card,
@@ -52,6 +60,9 @@ export function Results({ id }: { id: string }) {
     const st = audit.results[it.id]?.status;
     return st === "fail" || st === "warn";
   });
+  const manualItems = items.filter(
+    (it) => (audit.results[it.id]?.status ?? "na") === "manual",
+  );
 
   const visible = items.filter((it) => {
     const st = audit.results[it.id]?.status ?? "na";
@@ -196,6 +207,16 @@ export function Results({ id }: { id: string }) {
         </Card>
       )}
 
+      {/* Live-device guided checklist */}
+      {manualItems.length > 0 && (
+        <LiveDevicePanel
+          platform={audit.platform}
+          items={manualItems}
+          statusOf={(id) => audit.results[id]?.status ?? "manual"}
+          onSet={(id, st) => setItemStatus(audit.id, id, st)}
+        />
+      )}
+
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
         {filters.map((f) => (
@@ -264,6 +285,114 @@ export function Results({ id }: { id: string }) {
         )}
       </div>
     </div>
+  );
+}
+
+/* ---------------- live-device panel ---------------- */
+
+function LiveDevicePanel({
+  platform,
+  items,
+  statusOf,
+  onSet,
+}: {
+  platform: import("@/lib/types").Platform;
+  items: ChecklistItem[];
+  statusOf: (id: string) => ItemStatus;
+  onSet: (id: string, s: ItemStatus) => void;
+}) {
+  const g = LIVE_GUIDE[platform];
+  return (
+    <Card className="overflow-hidden">
+      <div className="border-b bg-surface-2 px-5 py-4">
+        <div className="flex items-center gap-2">
+          <Icon name="terminal" size={18} className="text-manual" style={{ color: "var(--manual)" }} />
+          <h2 className="font-semibold">Live-device checklist (USB debugging)</h2>
+          <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: "var(--manual-soft)", color: "var(--manual)" }}>
+            {items.length} to verify
+          </span>
+        </div>
+        <p className="mt-1 text-sm text-muted">
+          No engine can see these — they happen on the physical screen. Run the app
+          once with the device connected; the tool reads {g.reads} to confirm
+          automatically.
+        </p>
+      </div>
+
+      <div className="grid gap-5 p-5 md:grid-cols-[1.1fr_1fr]">
+        {/* Steps */}
+        <div>
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-2">
+            How to run it
+          </div>
+          <ol className="space-y-2">
+            {g.steps.map((s, i) => (
+              <li key={i} className="flex gap-2.5 text-sm">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-3 text-[11px] font-semibold">
+                  {i + 1}
+                </span>
+                <span className="text-muted">{s}</span>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-3 flex items-center justify-between gap-2 rounded-lg bg-surface-3 px-3 py-2 font-mono text-xs">
+            <span className="truncate">{g.verbose}</span>
+          </div>
+          <a
+            href={g.helpVideo}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-accent hover:underline"
+          >
+            <Icon name="external" size={13} /> New to this? Watch how to connect &
+            enable USB debugging
+          </a>
+        </div>
+
+        {/* Items to confirm */}
+        <div>
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-2">
+            Confirm each item
+          </div>
+          <div className="space-y-2">
+            {items.map((it) => {
+              const st = statusOf(it.id);
+              return (
+                <div key={it.id} className="rounded-xl border p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium">{it.title}</span>
+                    <StatusBadge status={st} size="sm" />
+                  </div>
+                  <div className="mt-2 flex items-center gap-1.5">
+                    <button
+                      onClick={() => onSet(it.id, "pass")}
+                      className="rounded-lg px-2.5 py-1 text-xs font-medium text-white transition"
+                      style={{ background: st === "pass" ? "var(--pass)" : "var(--na)" }}
+                    >
+                      ✓ Verified
+                    </button>
+                    <button
+                      onClick={() => onSet(it.id, "fail")}
+                      className="rounded-lg border px-2.5 py-1 text-xs font-medium text-muted transition hover:text-text"
+                    >
+                      ✗ Not working
+                    </button>
+                    <a
+                      href={it.docUrl || DOCS_HELP}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
+                    >
+                      Docs <Icon name="external" size={11} />
+                    </a>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </Card>
   );
 }
 

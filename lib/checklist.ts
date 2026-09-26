@@ -172,6 +172,7 @@ export const CHECKLIST: ChecklistItem[] = [
     title: "Notification received in killed state",
     expected: "Push arrives even when the app is killed.",
     method: "manual",
+    docUrl: "https://developer.clevertap.com/docs/android-push",
   },
   {
     id: "app-t3-background",
@@ -181,6 +182,7 @@ export const CHECKLIST: ChecklistItem[] = [
     title: "Notification received in background state",
     expected: "Push arrives when the app is in the background.",
     method: "manual",
+    docUrl: "https://developer.clevertap.com/docs/android-push",
   },
   {
     id: "app-t3-foreground",
@@ -190,6 +192,7 @@ export const CHECKLIST: ChecklistItem[] = [
     title: "Notification received in foreground state",
     expected: "Push arrives when the app is open/foreground.",
     method: "manual",
+    docUrl: "https://developer.clevertap.com/docs/android-push",
   },
   {
     id: "app-t3-impressions",

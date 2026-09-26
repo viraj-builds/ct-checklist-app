@@ -2,7 +2,7 @@
 
 export type Platform = "android" | "ios" | "web";
 
-export type AuditMode = "api" | "url" | "upload" | "cli";
+export type AuditMode = "api" | "url" | "upload" | "cli" | "full";
 
 // How a checklist item is verified
 export type CheckMethod =

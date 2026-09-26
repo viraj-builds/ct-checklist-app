@@ -75,6 +75,12 @@ export const MODE_META: Record<
   AuditMode,
   { label: string; desc: string; icon: string; needsSource: boolean }
 > = {
+  full: {
+    label: "Full analysis",
+    desc: "Account credentials + binary/URL. Runs all engines for maximum coverage.",
+    icon: "zap",
+    needsSource: true,
+  },
   api: {
     label: "CleverTap API",
     desc: "Read-only Account ID + Passcode. No source code needed. Highest coverage.",
@@ -109,3 +115,48 @@ export const REGIONS = [
   { id: "aps3", label: "India — Mumbai (aps3)" },
   { id: "mec1", label: "Middle East (mec1)" },
 ];
+
+// Guided live-device (USB debugging) instructions for the items no engine can see.
+// YouTube links are search URLs (always valid) so newcomers can find a walkthrough.
+export const LIVE_GUIDE: Record<
+  Platform,
+  { verbose: string; steps: string[]; helpVideo: string; reads: string }
+> = {
+  android: {
+    verbose: "CleverTapAPI.setDebugLevel(CleverTapAPI.LogLevel.VERBOSE);",
+    steps: [
+      "Enable Developer Options → USB debugging on the device.",
+      "Connect the device by USB and allow the debugging prompt.",
+      "Add the verbose log line above and run a debug build.",
+      "Trigger the push/in-app; the tool reads adb logcat (tag: CleverTap) to confirm.",
+    ],
+    helpVideo:
+      "https://www.youtube.com/results?search_query=how+to+enable+usb+debugging+android",
+    reads: "adb logcat (tag: CleverTap)",
+  },
+  ios: {
+    verbose: "CleverTap.setDebugLevel(CleverTapLogLevel.debug.rawValue)",
+    steps: [
+      "Connect the iPhone by USB and trust the computer.",
+      "Set the SDK debug level above in a development build.",
+      "Stream device console (Xcode Console or libimobiledevice / idevicesyslog).",
+      "Trigger the push/in-app; the tool parses the console output to confirm.",
+    ],
+    helpVideo:
+      "https://www.youtube.com/results?search_query=view+iphone+console+logs+xcode+device",
+    reads: "device console (idevicesyslog)",
+  },
+  web: {
+    verbose: "clevertap.setLogLevel(3)  //  or  sessionStorage['WZRK_D']=''",
+    steps: [
+      "Open the site in the crawler with verbose logging on.",
+      "The crawler reads the browser console + network calls to CleverTap.",
+      "Trigger the web push / event to confirm the outcome.",
+    ],
+    helpVideo:
+      "https://www.youtube.com/results?search_query=chrome+devtools+console+network+basics",
+    reads: "browser console + network",
+  },
+};
+
+export const DOCS_HELP = "https://developer.clevertap.com/docs/getting-started";

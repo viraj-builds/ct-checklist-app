@@ -1,36 +1,43 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# CleverTap Integration Audit
 
-## Getting Started
+Self-service audit of a CleverTap integration against the C4S checklist. **Android is live** (native, Flutter, React Native, Cordova/Ionic, Unity, .NET); iOS and Web come next.
 
-First, run the development server:
+## Setup
+
+1. `npm install`
+2. Copy `.env.example` → `.env.local` and fill in:
+   - `SUPABASE_URL`, `SUPABASE_SECRET_KEY` (server only)
+   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (used for direct-to-storage uploads)
+   - `CRON_SECRET` (any random string; protects `/api/cron/cleanup`)
+3. `npm run dev`
+
+The database schema (`audits`, `audit_results`, `audit_activity`, private bucket `audit-uploads`) is already applied to the Supabase project. RLS is on with no policies, so only server routes using the secret key can touch it.
+
+Analyse a build from the command line (no database needed):
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npx tsx scripts/scan-apk.ts path/to/app-release.apk
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## How an Android audit runs
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+Browser                                   Server (Vercel functions)               Supabase
+───────                                   ─────────────────────────               ────────
+POST /api/audits ───────────────────────▶ create audit row ─────────────────────▶ audits
+Private scan:  Web Worker analyses APK
+               POST /api/audits/:id/scan ▶ validate report, run rule engine ────▶ audit_results
+Upload scan:   PUT signed URL ──────────────────────────────────────────────────▶ storage (private)
+               POST /api/audits/:id/analyze ▶ download → analyse → delete file
+POST /api/audits/:id/verify {passcode} ─▶ CleverTap API sampling (passcode in memory only)
+Report page: tick items (PATCH …/items/:itemId), test push + confirm
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Layer | Where | What |
+| --- | --- | --- |
+| Static analyzer | `lib/analyzer/android` | Unzips APK/AAB/APKS/XAPK, parses binary & proto manifests and DEX bytecode (real call sites, string args such as event names and channel IDs), the Flutter AOT snapshot, and RN/Cordova JS. Isomorphic, so it runs in a Web Worker or on the server. |
+| API verifier | `lib/clevertap` | Samples Get Events / Get Profiles: App Launched/Installed, identity/email/phone coverage, E.164 phones, anonymous profiles, push tokens, impressions, custom-event property types, null values. Test push via `/1/send/push.json`. |
+| Rule engine | `lib/engine/android.ts` | Pure function (scan + API findings) → one verdict per checklist item, with evidence and fix. Never fails an item on API silence. |
+| Persistence | `lib/server` | Supabase repository; results are re-derived on each change, and manual ticks are kept as overrides. |
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Signatures (class names, method names, version markers) live in `lib/analyzer/android/signatures.ts`. Update them there when the SDK changes.

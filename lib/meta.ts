@@ -110,10 +110,10 @@ export const MODE_META: Record<
 export const REGIONS = [
   { id: "in1", label: "India (in1)" },
   { id: "us1", label: "United States (us1)" },
-  { id: "eu1", label: "Europe (eu1)" },
+  { id: "eu1", label: "Europe (eu1 · default)" },
   { id: "sg1", label: "Singapore (sg1)" },
-  { id: "aps3", label: "India — Mumbai (aps3)" },
-  { id: "mec1", label: "Middle East (mec1)" },
+  { id: "aps3", label: "Indonesia (aps3)" },
+  { id: "mec1", label: "Middle East — UAE (mec1)" },
 ];
 
 // Guided live-device (USB debugging) instructions for the items no engine can see.

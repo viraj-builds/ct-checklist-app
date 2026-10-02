@@ -1,4 +1,4 @@
-// Core domain types for the CleverTap Integration Audit tool (frontend only for now)
+// Core domain types for the CleverTap Integration Audit tool
 
 export type Platform = "android" | "ios" | "web";
 
@@ -20,7 +20,14 @@ export type ItemStatus =
   | "manual" // pending human verification
   | "na"; // not applicable to this platform
 
-export type AuditStatus = "queued" | "running" | "completed" | "failed";
+export type AuditStatus = "draft" | "scanning" | "verifying" | "completed" | "failed";
+
+// Where the binary was analysed: in the user's browser (never uploaded) or on
+// the server after an upload.
+export type AuditSource = "browser" | "upload" | "url";
+
+// Which engine produced a result.
+export type ResultSource = "static" | "api" | "static+api" | "manual" | "none";
 
 export interface ChecklistItem {
   id: string;
@@ -30,6 +37,12 @@ export interface ChecklistItem {
   title: string;
   expected: string;
   method: CheckMethod;
+  // Overrides `method` for a specific platform (e.g. splash exclusion is a
+  // manifest setting on Android but a manual check on iOS).
+  methodByPlatform?: Partial<Record<Platform, CheckMethod>>;
+  // "c4s" = from the C4S audit sheet; "sdk" = required by the SDK docs but
+  // missing from the sheet.
+  origin?: "c4s" | "sdk";
   docUrl?: string;
   faqRef?: number; // index into FAQ list, 1-based
   critical?: boolean;
@@ -42,6 +55,8 @@ export interface ItemResult {
   evidence?: string; // human-readable explanation of how it was checked
   remediation?: string; // fix guidance (often from FAQ)
   checkedManually?: boolean; // user ticked a manual item
+  details?: string[]; // extra bullet points (call sites, event names, schemes…)
+  source?: ResultSource;
 }
 
 export interface Audit {
@@ -53,8 +68,17 @@ export interface Audit {
   target?: string; // url / filename / account id (masked)
   createdAt: number;
   status: AuditStatus;
+  stage?: string;
+  error?: string;
+  source?: AuditSource;
+  accountId?: string;
+  fileName?: string;
+  fileSize?: number;
+  criticalEvents?: string[];
   submittedBy: string;
   results: Record<string, ItemResult>; // itemId -> result
+  scan?: import("./analyzer/types").AndroidScanReport;
+  api?: import("./clevertap/types").ApiFindings;
 }
 
 export interface FaqEntry {

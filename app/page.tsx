@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useAudits, summarize } from "@/lib/store";
+import { useAudits, useAuditsError, summarize } from "@/lib/store";
 import { AuditCard } from "@/components/audit/AuditCard";
 import { Card, Button, SectionTitle, EmptyState } from "@/components/ui";
 import { Icon, type IconName } from "@/components/Icon";
 
 export default function Dashboard() {
-  const audits = useAudits();
+  const loaded = useAudits();
+  const listError = useAuditsError();
+  const audits = loaded ?? [];
 
   const totals = audits.reduce(
     (acc, a) => {
@@ -80,7 +82,15 @@ export default function Dashboard() {
         >
           Recent audits
         </SectionTitle>
-        {audits.length === 0 ? (
+        {!loaded ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-44 skeleton rounded-[var(--radius)]" />
+            ))}
+          </div>
+        ) : listError ? (
+          <EmptyState icon="alert" title="Couldn't load audits" desc={listError} />
+        ) : audits.length === 0 ? (
           <EmptyState
             icon="clipboard"
             title="No audits yet"
@@ -120,8 +130,8 @@ export default function Dashboard() {
             icon="upload"
             title="Static Scanner"
             tone="var(--warn)"
-            desc="Parses APK / IPA / source for SDK version, manifest config, channels, deep links and the iOS Notification Service Extension."
-            tag="App · binary or source"
+            desc="Reads the APK/AAB manifest and bytecode — SDK version, credentials, FCM hand-off, channels, deep links and real API call sites. Runs in your browser, so the file never leaves your device."
+            tag="App · private by default"
           />
         </div>
       </div>

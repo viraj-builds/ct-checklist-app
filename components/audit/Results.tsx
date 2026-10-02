@@ -2,84 +2,83 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAudit, summarize, setItemStatus, deleteAudit, useMounted } from "@/lib/store";
-import { itemsForPlatform, TIER_LABELS } from "@/lib/checklist";
+import { useAudit, summarize, setItemStatus, deleteAudit, useMounted, api, refreshAudit } from "@/lib/store";
+import { itemsForPlatform, methodFor, TIER_LABELS } from "@/lib/checklist";
 import { getFaq } from "@/lib/faq";
-import {
-  PLATFORM_META,
-  MODE_META,
-  STATUS_META,
-  METHOD_META,
-  REGIONS,
-  LIVE_GUIDE,
-  DOCS_HELP,
-} from "@/lib/meta";
-import type { ChecklistItem, ItemStatus } from "@/lib/types";
-import {
-  Card,
-  Button,
-  ProgressRing,
-  StatusBadge,
-  MethodBadge,
-  PlatformIcon,
-  StatBar,
-  EmptyState,
-  Badge,
-} from "@/components/ui";
+import { PLATFORM_META, MODE_META, STATUS_META, METHOD_META, REGIONS, LIVE_GUIDE, DOCS_HELP } from "@/lib/meta";
+import type { Audit, ChecklistItem, ItemResult, ItemStatus, Platform } from "@/lib/types";
+import type { AndroidScanReport } from "@/lib/analyzer/types";
+import { recallPasscode, rememberPasscode } from "@/lib/session-secrets";
+import { Card, Button, ProgressRing, StatusBadge, MethodBadge, PlatformIcon, StatBar, EmptyState, Badge } from "@/components/ui";
 import { Icon } from "@/components/Icon";
-import { formatDate, cx } from "@/lib/format";
+import { formatDate, formatBytes, cx } from "@/lib/format";
 
 type Filter = "all" | ItemStatus;
 
+const FRAMEWORK_LABEL: Record<string, string> = {
+  native: "Native (Kotlin/Java)",
+  flutter: "Flutter",
+  "react-native": "React Native",
+  cordova: "Cordova",
+  capacitor: "Ionic Capacitor",
+  unity: "Unity",
+  dotnet: "Xamarin / .NET MAUI",
+  unknown: "Unknown",
+};
+
 export function Results({ id }: { id: string }) {
   const router = useRouter();
-  const audit = useAudit(id);
+  const { audit, error } = useAudit(id);
   const mounted = useMounted();
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
-  const items = useMemo(
-    () => (audit ? itemsForPlatform(audit.platform) : []),
-    [audit],
-  );
+  const items = useMemo(() => (audit ? itemsForPlatform(audit.platform) : []), [audit]);
 
-  if (!mounted) return <ResultsSkeleton />;
-  if (!audit)
+  if (!mounted || audit === undefined) {
+    if (error) return <EmptyState icon="alert" title="Couldn't load the audit" desc={error} />;
+    return <ResultsSkeleton />;
+  }
+  if (audit === null)
     return (
       <EmptyState
         icon="alert"
         title="Audit not found"
-        desc="This audit doesn't exist in this browser. It may have been created on another device."
-        action={<Button href="/audits" icon="list">All audits</Button>}
+        desc="This audit doesn't exist or was deleted."
+        action={
+          <Button href="/audits" icon="list">
+            All audits
+          </Button>
+        }
       />
     );
 
   const s = summarize(audit);
-  const issues = items.filter((it) => {
-    const st = audit.results[it.id]?.status;
-    return st === "fail" || st === "warn";
-  });
-  const manualItems = items.filter(
-    (it) => (audit.results[it.id]?.status ?? "na") === "manual",
-  );
+  const running = audit.status === "draft" || audit.status === "scanning" || audit.status === "verifying";
+  const resultOf = (itemId: string): ItemResult | undefined => audit.results[itemId];
+  const statusOf = (itemId: string): ItemStatus => resultOf(itemId)?.status ?? "manual";
+
+  const tierRank = (it: ChecklistItem) => (it.critical ? 0 : 10) + it.tier;
+  const issues = items
+    .filter((it) => ["fail", "warn"].includes(statusOf(it.id)))
+    .sort((a, b) => (statusOf(a.id) === "fail" ? 0 : 1) - (statusOf(b.id) === "fail" ? 0 : 1) || tierRank(a) - tierRank(b));
+  const manualItems = items.filter((it) => statusOf(it.id) === "manual" && methodFor(it, audit.platform) !== "auto-api");
 
   const visible = items.filter((it) => {
-    const st = audit.results[it.id]?.status ?? "na";
-    if (filter !== "all" && st !== filter) return false;
-    if (query && !it.title.toLowerCase().includes(query.toLowerCase()))
-      return false;
+    if (filter !== "all" && statusOf(it.id) !== filter) return false;
+    if (query && !it.title.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
-
   const tiers = Array.from(new Set(items.map((i) => i.tier))).sort();
-
   const filters: { key: Filter; label: string; count: number }[] = [
     { key: "all", label: "All", count: items.length },
     { key: "fail", label: "Fail", count: s.counts.fail },
     { key: "warn", label: "Warning", count: s.counts.warn },
     { key: "manual", label: "Manual", count: s.counts.manual },
     { key: "pass", label: "Pass", count: s.counts.pass },
+    { key: "na", label: "N/A", count: s.counts.na },
   ];
 
   return (
@@ -91,19 +90,28 @@ export function Results({ id }: { id: string }) {
             <PlatformIcon platform={audit.platform} size={22} />
           </span>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-bold tracking-tight">{audit.name}</h1>
               <Badge tone="neutral">{PLATFORM_META[audit.platform].label}</Badge>
+              {audit.source === "browser" && (
+                <Badge tone="success">
+                  <Icon name="lock" size={11} /> Private scan
+                </Badge>
+              )}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
               <span className="flex items-center gap-1">
                 <Icon name={MODE_META[audit.mode].icon as never} size={13} />
                 {MODE_META[audit.mode].label}
               </span>
-              {audit.region && (
-                <span>· {REGIONS.find((r) => r.id === audit.region)?.label}</span>
+              {audit.region && <span>· {REGIONS.find((r) => r.id === audit.region)?.label ?? audit.region}</span>}
+              {audit.accountId && <span className="font-mono">· {audit.accountId}</span>}
+              {audit.fileName && (
+                <span className="font-mono">
+                  · {audit.fileName}
+                  {audit.fileSize ? ` (${formatBytes(audit.fileSize)})` : ""}
+                </span>
               )}
-              <span className="font-mono">· {audit.target}</span>
               <span>· {formatDate(audit.createdAt)}</span>
             </div>
           </div>
@@ -116,15 +124,39 @@ export function Results({ id }: { id: string }) {
             variant="ghost"
             size="sm"
             icon="trash"
-            onClick={() => {
-              deleteAudit(audit.id);
-              router.push("/audits");
+            disabled={deleting}
+            onClick={async () => {
+              if (!confirm("Delete this audit and its results?")) return;
+              setDeleting(true);
+              try {
+                await deleteAudit(audit.id);
+                router.push("/audits");
+              } catch (e) {
+                setDeleting(false);
+                alert((e as Error).message);
+              }
             }}
           >
             Delete
           </Button>
         </div>
       </div>
+
+      {running && (
+        <Banner tone="info" icon="clock" title={audit.stage ?? "Processing…"}>
+          This page updates automatically. If you closed the window during a private scan, start a new audit.
+        </Banner>
+      )}
+      {audit.status === "failed" && audit.error && (
+        <Banner tone="fail" icon="alert" title="The analysis failed">
+          {audit.error}
+        </Banner>
+      )}
+      {audit.status === "completed" && audit.error && (
+        <Banner tone="warn" icon="alert" title="Some checks were skipped">
+          {audit.error}
+        </Banner>
+      )}
 
       {/* Summary */}
       <div className="grid gap-4 lg:grid-cols-[auto_1fr]">
@@ -133,11 +165,13 @@ export function Results({ id }: { id: string }) {
           <div className="space-y-2">
             <div className="text-sm font-medium">Integration score</div>
             <p className="max-w-[180px] text-xs leading-relaxed text-muted">
-              Share of auto-checkable items passing. Manual items are tracked
-              separately.
+              Share of automatically checked items that pass. Manual items are tracked separately.
             </p>
             {s.manualPending > 0 && (
-              <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium" style={{ background: "var(--manual-soft)", color: "var(--manual)" }}>
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium"
+                style={{ background: "var(--manual-soft)", color: "var(--manual)" }}
+              >
                 <Icon name="clock" size={12} /> {s.manualPending} manual checks pending
               </span>
             )}
@@ -166,6 +200,9 @@ export function Results({ id }: { id: string }) {
         </Card>
       </div>
 
+      {/* What the scan found */}
+      {audit.scan && <ScanSummary scan={audit.scan} audit={audit} />}
+
       {/* What needs to be done */}
       {issues.length > 0 && (
         <Card className="p-5">
@@ -175,26 +212,27 @@ export function Results({ id }: { id: string }) {
           </div>
           <div className="space-y-2">
             {issues.map((it) => {
-              const r = audit.results[it.id];
+              const r = resultOf(it.id)!;
               return (
-                <div
-                  key={it.id}
-                  className="flex items-start gap-3 rounded-xl border bg-surface-2 p-3"
-                >
+                <div key={it.id} className="flex items-start gap-3 rounded-xl border bg-surface-2 p-3">
                   <StatusBadge status={r.status} size="sm" />
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium">{it.title}</div>
-                    {r.remediation && (
-                      <div className="mt-0.5 text-xs text-muted">{r.remediation}</div>
+                    <div className="text-sm font-medium">
+                      {it.title}
+                      {r.detected && <span className="font-normal text-muted"> — {r.detected}</span>}
+                    </div>
+                    {(r.remediation || r.evidence) && (
+                      <div className="mt-0.5 text-xs text-muted">{r.remediation ?? r.evidence}</div>
                     )}
                   </div>
                   <button
                     onClick={() => {
                       setFilter("all");
                       setOpenId(it.id);
-                      document
-                        .getElementById(`item-${it.id}`)
-                        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                      setTimeout(
+                        () => document.getElementById(`item-${it.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }),
+                        50,
+                      );
                     }}
                     className="shrink-0 text-xs font-medium text-brand hover:underline"
                   >
@@ -207,13 +245,16 @@ export function Results({ id }: { id: string }) {
         </Card>
       )}
 
+      {/* API + test push */}
+      {audit.platform === "android" && audit.accountId && <ApiPanel audit={audit} />}
+
       {/* Live-device guided checklist */}
       {manualItems.length > 0 && (
         <LiveDevicePanel
           platform={audit.platform}
           items={manualItems}
-          statusOf={(id) => audit.results[id]?.status ?? "manual"}
-          onSet={(id, st) => setItemStatus(audit.id, id, st)}
+          statusOf={statusOf}
+          onSet={(itemId, st) => setItemStatus(audit.id, itemId, st)}
         />
       )}
 
@@ -225,9 +266,7 @@ export function Results({ id }: { id: string }) {
             onClick={() => setFilter(f.key)}
             className={cx(
               "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition",
-              filter === f.key
-                ? "border-brand bg-brand-soft text-brand"
-                : "text-muted hover:bg-surface-2",
+              filter === f.key ? "border-brand bg-brand-soft text-brand" : "text-muted hover:bg-surface-2",
             )}
           >
             {f.label}
@@ -235,11 +274,7 @@ export function Results({ id }: { id: string }) {
           </button>
         ))}
         <div className="relative ml-auto">
-          <Icon
-            name="search"
-            size={15}
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-2"
-          />
+          <Icon name="search" size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-2" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -265,14 +300,10 @@ export function Results({ id }: { id: string }) {
                   <ItemRow
                     key={it.id}
                     item={it}
-                    status={audit.results[it.id]?.status ?? "na"}
-                    detected={audit.results[it.id]?.detected}
-                    evidence={audit.results[it.id]?.evidence}
-                    remediation={audit.results[it.id]?.remediation}
+                    platform={audit.platform}
+                    result={resultOf(it.id)}
                     open={openId === it.id}
-                    onToggle={() =>
-                      setOpenId((cur) => (cur === it.id ? null : it.id))
-                    }
+                    onToggle={() => setOpenId((cur) => (cur === it.id ? null : it.id))}
                     onSet={(st) => setItemStatus(audit.id, it.id, st)}
                   />
                 ))}
@@ -280,11 +311,284 @@ export function Results({ id }: { id: string }) {
             </div>
           );
         })}
-        {visible.length === 0 && (
-          <EmptyState icon="search" title="No items match" desc="Try a different filter or search." />
-        )}
+        {visible.length === 0 && <EmptyState icon="search" title="No items match" desc="Try a different filter or search." />}
       </div>
     </div>
+  );
+}
+
+/* ---------------- banners ---------------- */
+
+function Banner({
+  tone,
+  icon,
+  title,
+  children,
+}: {
+  tone: "info" | "warn" | "fail";
+  icon: "clock" | "alert";
+  title: string;
+  children: React.ReactNode;
+}) {
+  const c = tone === "info" ? "var(--accent)" : tone === "warn" ? "var(--warn)" : "var(--fail)";
+  const bg = tone === "info" ? "var(--accent-soft)" : tone === "warn" ? "var(--warn-soft)" : "var(--fail-soft)";
+  return (
+    <div className="flex items-start gap-3 rounded-xl border p-4" style={{ background: bg }}>
+      {tone === "info" ? (
+        <span className="mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 border-t-transparent animate-spin-slow" style={{ borderColor: c, borderTopColor: "transparent" }} />
+      ) : (
+        <Icon name={icon} size={18} style={{ color: c }} className="mt-0.5 shrink-0" />
+      )}
+      <div className="min-w-0">
+        <div className="text-sm font-semibold" style={{ color: c }}>
+          {title}
+        </div>
+        <div className="mt-0.5 text-xs leading-relaxed text-muted">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- scan summary ---------------- */
+
+function ScanSummary({ scan, audit }: { scan: AndroidScanReport; audit: Audit }) {
+  const [open, setOpen] = useState(false);
+  const ct = scan.clevertap;
+  const sdk = ct.coreVersion ? `v${ct.coreVersion}` : ct.minVersionEstimate ? `≥ ${ct.minVersionEstimate}` : ct.present ? "version unknown" : "not found";
+  const facts: [string, string][] = [
+    ["Package", scan.app.packageName ?? "—"],
+    ["App version", [scan.app.versionName, scan.app.versionCode && `(${scan.app.versionCode})`].filter(Boolean).join(" ") || "—"],
+    ["Framework", FRAMEWORK_LABEL[scan.framework.primary] + (scan.framework.hermes ? " · Hermes" : "") + (scan.framework.expo ? " · Expo" : "")],
+    ["CleverTap SDK", sdk],
+    ["Target / min SDK", `${scan.app.targetSdk ?? "?"} / ${scan.app.minSdk ?? "?"}`],
+    ["Build", `${scan.file.kind.toUpperCase()} · ${scan.app.debuggable ? "debug" : "release"}${scan.obfuscated ? " · minified" : ""}`],
+  ];
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center justify-between gap-3 border-b bg-surface-2 px-5 py-3.5">
+        <div className="flex items-center gap-2">
+          <Icon name="android" size={17} className="text-[var(--pass)]" />
+          <h2 className="text-sm font-semibold">What we found in the build</h2>
+        </div>
+        <span className="text-xs text-muted">
+          Scanned {scan.scannedIn === "browser" ? "in the browser" : "on the server"} in {(scan.durationMs / 1000).toFixed(1)}s
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-px bg-[var(--border)] sm:grid-cols-3">
+        {facts.map(([k, v]) => (
+          <div key={k} className="bg-surface px-4 py-3">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-2">{k}</div>
+            <div className="mt-0.5 truncate text-sm font-medium" title={v}>
+              {v}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="space-y-3 px-5 py-4">
+        <div className="flex flex-wrap gap-1.5">
+          {ct.wrapper && <Badge tone="brand">{ct.wrapper.label}</Badge>}
+          {ct.modules.map((m) => (
+            <Badge key={m.id} tone="neutral">
+              {m.label}
+              {m.version ? ` ${m.version}` : ""}
+            </Badge>
+          ))}
+          {scan.eventNames.length > 0 && <Badge tone="accent">{scan.eventNames.length} event names in code</Badge>}
+        </div>
+        {scan.notes.length > 0 && (
+          <ul className="space-y-1">
+            {scan.notes.map((n) => (
+              <li key={n} className="flex gap-2 text-xs leading-relaxed text-muted">
+                <Icon name="info" size={13} className="mt-0.5 shrink-0 text-accent" />
+                {n}
+              </li>
+            ))}
+          </ul>
+        )}
+        <button onClick={() => setOpen((v) => !v)} className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline">
+          <Icon name="chevronDown" size={13} className={cx("transition", open && "rotate-180")} />
+          {open ? "Hide" : "Show"} manifest & code details
+        </button>
+        {open && (
+          <div className="grid gap-4 text-xs md:grid-cols-2">
+            <DetailList
+              title="CleverTap manifest keys"
+              rows={Object.entries(scan.manifest.metaData).map(([k, v]) => `${k} = ${k === "CLEVERTAP_TOKEN" ? v.slice(0, 3) + "•••" : v}`)}
+            />
+            <DetailList
+              title="API calls found"
+              rows={Object.entries(scan.apis)
+                .filter(([, u]) => u.found)
+                .map(([k, u]) => `${k} — ${u.layers.join(", ")}${u.confidence !== "high" ? ` (${u.confidence} confidence)` : ""}`)}
+            />
+            <DetailList title="Event names in code" rows={scan.eventNames} />
+            <DetailList title="CleverTap components" rows={scan.manifest.ctComponents} />
+            {audit.api?.ok && (
+              <DetailList
+                title="CleverTap API sample"
+                rows={Object.values(audit.api.events).map(
+                  (e) => `${e.name}: ${e.error ? e.error : `${e.capped ? "≥" : ""}${e.androidSampled} in ${e.windowDays}d`}`,
+                )}
+              />
+            )}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function DetailList({ title, rows }: { title: string; rows: string[] }) {
+  return (
+    <div>
+      <div className="mb-1 font-semibold text-muted-2 uppercase tracking-wide text-[11px]">{title}</div>
+      {rows.length === 0 ? (
+        <div className="text-muted">None</div>
+      ) : (
+        <ul className="space-y-0.5 font-mono text-[11.5px] leading-relaxed">
+          {rows.slice(0, 30).map((r) => (
+            <li key={r} className="break-all">
+              {r}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- API panel: re-verify + test push ---------------- */
+
+function ApiPanel({ audit }: { audit: Audit }) {
+  const scan = audit.scan;
+  const [passcode, setPasscode] = useState(() => recallPasscode(audit.id) ?? "");
+  const [identity, setIdentity] = useState("");
+  const [channelId, setChannelId] = useState(
+    () => scan?.channelIds[0] ?? scan?.manifest.metaData.CLEVERTAP_DEFAULT_CHANNEL_ID ?? scan?.apis.androidChannel.strings[0] ?? "",
+  );
+  const firstLink = scan?.manifest.deepLinks.find((d) => !/^(com\.google|com\.facebook|com\.clevertap)/.test(d.activity));
+  const [deepLink, setDeepLink] = useState(firstLink ? `${firstLink.scheme}://${firstLink.host ?? ""}${firstLink.path ?? ""}` : "");
+  const [busy, setBusy] = useState<"" | "verify" | "send" | "confirm">("");
+  const [msg, setMsg] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
+  const push = audit.api?.testPush;
+  const apiOk = audit.api?.ok;
+
+  async function act(kind: "verify" | "send" | "confirm") {
+    setBusy(kind);
+    setMsg(null);
+    rememberPasscode(audit.id, passcode);
+    try {
+      if (kind === "verify") {
+        const r = await api<{ ok: boolean; error?: string }>(`/api/audits/${audit.id}/verify`, {
+          method: "POST",
+          body: JSON.stringify({ passcode }),
+        });
+        setMsg(r.ok ? { tone: "ok", text: "API checks updated." } : { tone: "err", text: r.error ?? "Verification failed." });
+      } else if (kind === "send") {
+        const r = await api<{ testPush: { status: string; message?: string } }>(`/api/audits/${audit.id}/test-push`, {
+          method: "POST",
+          body: JSON.stringify({ passcode, identity, channelId: channelId || undefined, deepLink: deepLink || undefined }),
+        });
+        setMsg(
+          r.testPush.status === "failed"
+            ? { tone: "err", text: r.testPush.message ?? "CleverTap rejected the push." }
+            : { tone: "ok", text: "Push queued. Wait for it on the device, then press “Check delivery”." },
+        );
+      } else {
+        const r = await api<{ testPush: { status: string; clicked?: boolean } }>(`/api/audits/${audit.id}/test-push/confirm`, {
+          method: "POST",
+          body: JSON.stringify({ passcode, identity }),
+        });
+        setMsg(
+          r.testPush.status === "confirmed"
+            ? { tone: "ok", text: `Delivered and viewed${r.testPush.clicked ? " — and clicked" : ""}.` }
+            : { tone: "err", text: "No Notification Viewed event yet. Events can take a minute — try again shortly." },
+        );
+      }
+    } catch (e) {
+      setMsg({ tone: "err", text: (e as Error).message });
+    } finally {
+      setBusy("");
+      refreshAudit(audit.id);
+    }
+  }
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="border-b bg-surface-2 px-5 py-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Icon name="key" size={17} className="text-accent" />
+          <h2 className="font-semibold">CleverTap API checks & test push</h2>
+          {audit.api ? (
+            apiOk ? (
+              <Badge tone="success">Verified {formatDate(audit.api.checkedAt)}</Badge>
+            ) : (
+              <Badge tone="danger">{audit.api.error}</Badge>
+            )
+          ) : (
+            <Badge tone="neutral">Not run</Badge>
+          )}
+        </div>
+        <p className="mt-1 text-sm text-muted">
+          The passcode stays in this tab&apos;s memory only. Test pushes go to the single identity you enter.
+        </p>
+      </div>
+      <div className="grid gap-5 p-5 md:grid-cols-2">
+        <div className="space-y-3">
+          <MiniField label="Passcode">
+            <input type="password" value={passcode} onChange={(e) => setPasscode(e.target.value)} className="input font-mono" placeholder="••••••••" />
+          </MiniField>
+          <Button size="sm" variant="secondary" icon="refresh" disabled={passcode.length < 3 || !!busy} onClick={() => act("verify")}>
+            {busy === "verify" ? "Verifying…" : audit.api ? "Re-run API checks" : "Run API checks"}
+          </Button>
+        </div>
+        <div className="space-y-3">
+          <MiniField label="Test identity (a profile on your test device)">
+            <input value={identity} onChange={(e) => setIdentity(e.target.value)} className="input font-mono" placeholder="e.g. test_user_01" />
+          </MiniField>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <MiniField label="Channel ID">
+              <input value={channelId} onChange={(e) => setChannelId(e.target.value)} className="input font-mono" placeholder="channel id" />
+            </MiniField>
+            <MiniField label="Deep link (optional)">
+              <input value={deepLink} onChange={(e) => setDeepLink(e.target.value)} className="input font-mono" placeholder="myapp://home" />
+            </MiniField>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" icon="bell" disabled={passcode.length < 3 || !identity || !!busy} onClick={() => act("send")}>
+              {busy === "send" ? "Sending…" : "Send test push"}
+            </Button>
+            {push && push.status !== "failed" && (
+              <Button size="sm" variant="secondary" icon="check" disabled={passcode.length < 3 || !identity || !!busy} onClick={() => act("confirm")}>
+                {busy === "confirm" ? "Checking…" : "Check delivery"}
+              </Button>
+            )}
+            {push && (
+              <span className="text-xs text-muted">
+                Last: {push.identity} · {push.status} · {formatDate(push.sentAt)}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+      {msg && (
+        <div
+          className="mx-5 mb-5 rounded-lg px-3 py-2 text-xs"
+          style={{ background: msg.tone === "ok" ? "var(--pass-soft)" : "var(--fail-soft)", color: msg.tone === "ok" ? "var(--pass)" : "var(--fail)" }}
+        >
+          {msg.text}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function MiniField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
+      {children}
+    </label>
   );
 }
 
@@ -296,7 +600,7 @@ function LiveDevicePanel({
   statusOf,
   onSet,
 }: {
-  platform: import("@/lib/types").Platform;
+  platform: Platform;
   items: ChecklistItem[];
   statusOf: (id: string) => ItemStatus;
   onSet: (id: string, s: ItemStatus) => void;
@@ -306,31 +610,25 @@ function LiveDevicePanel({
     <Card className="overflow-hidden">
       <div className="border-b bg-surface-2 px-5 py-4">
         <div className="flex items-center gap-2">
-          <Icon name="terminal" size={18} className="text-manual" style={{ color: "var(--manual)" }} />
-          <h2 className="font-semibold">Live-device checklist (USB debugging)</h2>
+          <Icon name="terminal" size={18} style={{ color: "var(--manual)" }} />
+          <h2 className="font-semibold">Live-device checklist</h2>
           <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: "var(--manual-soft)", color: "var(--manual)" }}>
             {items.length} to verify
           </span>
         </div>
         <p className="mt-1 text-sm text-muted">
-          No engine can see these — they happen on the physical screen. Run the app
-          once with the device connected; the tool reads {g.reads} to confirm
-          automatically.
+          These happen on the physical screen, so no engine can see them. Run the app on a device with verbose logging and
+          tick each one.
         </p>
       </div>
 
       <div className="grid gap-5 p-5 md:grid-cols-[1.1fr_1fr]">
-        {/* Steps */}
         <div>
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-2">
-            How to run it
-          </div>
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-2">How to run it</div>
           <ol className="space-y-2">
             {g.steps.map((s, i) => (
               <li key={i} className="flex gap-2.5 text-sm">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-3 text-[11px] font-semibold">
-                  {i + 1}
-                </span>
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-3 text-[11px] font-semibold">{i + 1}</span>
                 <span className="text-muted">{s}</span>
               </li>
             ))}
@@ -344,16 +642,12 @@ function LiveDevicePanel({
             rel="noreferrer"
             className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-accent hover:underline"
           >
-            <Icon name="external" size={13} /> New to this? Watch how to connect &
-            enable USB debugging
+            <Icon name="external" size={13} /> New to this? Watch how to enable USB debugging
           </a>
         </div>
 
-        {/* Items to confirm */}
         <div>
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-2">
-            Confirm each item
-          </div>
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-2">Confirm each item</div>
           <div className="space-y-2">
             {items.map((it) => {
               const st = statusOf(it.id);
@@ -400,33 +694,27 @@ function LiveDevicePanel({
 
 function ItemRow({
   item,
-  status,
-  detected,
-  evidence,
-  remediation,
+  platform,
+  result,
   open,
   onToggle,
   onSet,
 }: {
   item: ChecklistItem;
-  status: ItemStatus;
-  detected?: string;
-  evidence?: string;
-  remediation?: string;
+  platform: Platform;
+  result?: ItemResult;
   open: boolean;
   onToggle: () => void;
   onSet: (s: ItemStatus) => void;
 }) {
+  const status: ItemStatus = result?.status ?? "manual";
   const faq = getFaq(item.faqRef);
-  const canOverride = item.method === "manual" || item.method === "hybrid";
+  const method = methodFor(item, platform);
   const m = STATUS_META[status];
 
   return (
     <div id={`item-${item.id}`} className={cx(open && "bg-surface-2")}>
-      <button
-        onClick={onToggle}
-        className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition hover:bg-surface-2"
-      >
+      <button onClick={onToggle} className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition hover:bg-surface-2">
         <span
           className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[13px]"
           style={{ background: m.soft, color: m.token }}
@@ -447,39 +735,48 @@ function ItemRow({
           <div className="flex items-center gap-2">
             <span className="truncate text-sm font-medium">{item.title}</span>
             {item.critical && (
-              <span className="rounded bg-brand-soft px-1.5 text-[10px] font-semibold uppercase text-brand">
-                Critical
+              <span className="rounded bg-brand-soft px-1.5 text-[10px] font-semibold uppercase text-brand">Critical</span>
+            )}
+            {item.origin === "sdk" && (
+              <span className="rounded bg-surface-3 px-1.5 text-[10px] font-semibold uppercase text-muted" title="Required by the SDK docs; not on the C4S sheet">
+                SDK
               </span>
             )}
           </div>
-          {detected && (
-            <div className="mt-0.5 truncate text-xs text-muted">{detected}</div>
-          )}
+          {result?.detected && <div className="mt-0.5 truncate text-xs text-muted">{result.detected}</div>}
         </div>
-        <MethodBadge method={item.method} />
+        {result?.checkedManually && <Badge tone="neutral">Ticked</Badge>}
+        <MethodBadge method={method} />
         <StatusBadge status={status} size="sm" />
-        <Icon
-          name="chevronDown"
-          size={16}
-          className={cx("shrink-0 text-muted transition", open && "rotate-180")}
-        />
+        <Icon name="chevronDown" size={16} className={cx("shrink-0 text-muted transition", open && "rotate-180")} />
       </button>
 
       {open && (
         <div className="animate-fade-in space-y-4 border-t px-4 py-4 sm:pl-[52px]">
           <Detail label="Expected">{item.expected}</Detail>
-          {evidence && <Detail label="How it was checked">{evidence}</Detail>
-          }
+          {result?.evidence && <Detail label="What we found">{result.evidence}</Detail>}
+          {result?.details && result.details.length > 0 && (
+            <Detail label="Details">
+              <ul className="mt-1 space-y-0.5 font-mono text-[12px] text-muted">
+                {result.details.map((d) => (
+                  <li key={d} className="break-all">
+                    {d}
+                  </li>
+                ))}
+              </ul>
+            </Detail>
+          )}
           <Detail label="Verification method">
-            {METHOD_META[item.method].label} — {METHOD_META[item.method].desc}
+            {METHOD_META[method].label} — {METHOD_META[method].desc}
+            {result?.source && result.source !== "none" && <span className="text-muted"> · source: {result.source}</span>}
           </Detail>
 
-          {remediation && (
+          {result?.remediation && (status === "fail" || status === "warn") && (
             <div className="rounded-xl border p-3.5" style={{ background: "var(--fail-soft)" }}>
               <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold" style={{ color: "var(--fail)" }}>
                 <Icon name="zap" size={13} /> Suggested fix
               </div>
-              <p className="text-sm text-text">{remediation}</p>
+              <p className="text-sm text-text">{result.remediation}</p>
               {faq?.links?.[0] && (
                 <a
                   href={faq.links[0].url}
@@ -504,41 +801,32 @@ function ItemRow({
                 <Icon name="external" size={13} /> Documentation
               </a>
             )}
-            {canOverride && (
-              <div className="ml-auto flex items-center gap-1.5">
-                <span className="text-xs text-muted">Mark:</span>
-                <button
-                  onClick={() => onSet("pass")}
-                  className={cx(
-                    "rounded-lg px-2.5 py-1.5 text-xs font-medium transition",
-                    status === "pass"
-                      ? "text-white"
-                      : "border text-muted hover:text-text",
-                  )}
-                  style={status === "pass" ? { background: "var(--pass)" } : undefined}
-                >
-                  ✓ Verified
-                </button>
-                <button
-                  onClick={() => onSet("fail")}
-                  className={cx(
-                    "rounded-lg px-2.5 py-1.5 text-xs font-medium transition",
-                    status === "fail"
-                      ? "text-white"
-                      : "border text-muted hover:text-text",
-                  )}
-                  style={status === "fail" ? { background: "var(--fail)" } : undefined}
-                >
-                  ✗ Not working
-                </button>
+            <div className="ml-auto flex items-center gap-1.5">
+              <span className="text-xs text-muted">Mark:</span>
+              <button
+                onClick={() => onSet("pass")}
+                className={cx("rounded-lg px-2.5 py-1.5 text-xs font-medium transition", status === "pass" && result?.checkedManually ? "text-white" : "border text-muted hover:text-text")}
+                style={status === "pass" && result?.checkedManually ? { background: "var(--pass)" } : undefined}
+              >
+                ✓ Verified
+              </button>
+              <button
+                onClick={() => onSet("fail")}
+                className={cx("rounded-lg px-2.5 py-1.5 text-xs font-medium transition", status === "fail" && result?.checkedManually ? "text-white" : "border text-muted hover:text-text")}
+                style={status === "fail" && result?.checkedManually ? { background: "var(--fail)" } : undefined}
+              >
+                ✗ Not working
+              </button>
+              {result?.checkedManually && (
                 <button
                   onClick={() => onSet("manual")}
                   className="rounded-lg border px-2.5 py-1.5 text-xs font-medium text-muted transition hover:text-text"
+                  title="Go back to the automatic result"
                 >
                   Reset
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -549,9 +837,7 @@ function ItemRow({
 function Detail({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="text-xs font-semibold uppercase tracking-wide text-muted-2">
-        {label}
-      </div>
+      <div className="text-xs font-semibold uppercase tracking-wide text-muted-2">{label}</div>
       <div className="mt-0.5 text-sm leading-relaxed">{children}</div>
     </div>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useAudits, resetStore } from "@/lib/store";
+import { useAudits, useAuditsError } from "@/lib/store";
 import { AuditCard } from "@/components/audit/AuditCard";
 import { Button, EmptyState, SectionTitle } from "@/components/ui";
 import { PLATFORM_META } from "@/lib/meta";
@@ -12,7 +12,9 @@ import { Icon } from "@/components/Icon";
 type PF = "all" | Platform;
 
 export default function AuditsPage() {
-  const audits = useAudits();
+  const loaded = useAudits();
+  const listError = useAuditsError();
+  const audits = loaded ?? [];
   const [pf, setPf] = useState<PF>("all");
 
   const filtered = pf === "all" ? audits : audits.filter((a) => a.platform === pf);
@@ -26,12 +28,9 @@ export default function AuditsPage() {
   return (
     <div>
       <SectionTitle
-        sub="Every integration audit in this browser"
+        sub="Every integration audit, newest first"
         action={
           <div className="flex gap-2">
-            <Button variant="ghost" size="sm" icon="refresh" onClick={resetStore}>
-              Reset samples
-            </Button>
             <Button href="/new" size="sm" icon="plus">
               New Audit
             </Button>
@@ -66,11 +65,19 @@ export default function AuditsPage() {
         ))}
       </div>
 
-      {filtered.length === 0 ? (
+      {!loaded ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-44 skeleton rounded-[var(--radius)]" />
+          ))}
+        </div>
+      ) : listError ? (
+        <EmptyState icon="alert" title="Couldn't load audits" desc={listError} />
+      ) : filtered.length === 0 ? (
         <EmptyState
           icon="list"
           title="No audits here"
-          desc="Run a new audit or reset the sample data."
+          desc="Run a new audit to see it here."
           action={<Button href="/new" icon="plus">New Audit</Button>}
         />
       ) : (

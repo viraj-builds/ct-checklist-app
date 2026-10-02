@@ -1,4 +1,4 @@
-import type { ChecklistItem, Platform } from "./types";
+import type { CheckMethod, ChecklistItem, Platform } from "./types";
 
 // ---------------------------------------------------------------------------
 // Full C4S Integration Audit checklist, transcribed from the CleverTap
@@ -43,6 +43,46 @@ export const CHECKLIST: ChecklistItem[] = [
     expected: "The integrated SDK should be on (or near) the latest release.",
     method: "auto-static",
     docUrl: "https://developer.clevertap.com/docs/changelog",
+  },
+  {
+    id: "app-t1-credentials",
+    scope: "app",
+    platforms: ["android", "ios"],
+    tier: 1,
+    title: "Account ID, Token & Region configured",
+    expected:
+      "CLEVERTAP_ACCOUNT_ID, CLEVERTAP_TOKEN (and CLEVERTAP_REGION) are set and match the project on the dashboard.",
+    method: "auto-static",
+    origin: "sdk",
+    critical: true,
+    faqRef: 1,
+    docUrl: "https://developer.clevertap.com/docs/android-quickstart-guide",
+  },
+  {
+    id: "app-t1-lifecycle",
+    scope: "app",
+    platforms: ["android"],
+    tier: 1,
+    title: "Activity lifecycle callback registered",
+    expected:
+      "ActivityLifecycleCallback.register(this) is called in Application.onCreate (or the app extends CleverTap's Application) — required for App Launched and sessions.",
+    method: "auto-static",
+    origin: "sdk",
+    critical: true,
+    docUrl: "https://developer.clevertap.com/docs/android-quickstart-guide",
+  },
+  {
+    id: "app-t1-fcm-service",
+    scope: "app",
+    platforms: ["android"],
+    tier: 1,
+    title: "FCM messages handed off to CleverTap",
+    expected:
+      "CleverTap's FCM service is registered, or a custom FirebaseMessagingService forwards CleverTap pushes (CTFcmMessageHandler) and new tokens.",
+    method: "auto-static",
+    origin: "sdk",
+    faqRef: 12,
+    docUrl: "https://developer.clevertap.com/docs/android-push#custom-android-push-notification-handling",
   },
   {
     id: "app-t1-channel",
@@ -244,6 +284,20 @@ export const CHECKLIST: ChecklistItem[] = [
     title: "In-app screen exclude (splash)",
     expected: "Splash / loading screens are excluded from in-app display.",
     method: "manual",
+    methodByPlatform: { android: "auto-static" },
+    docUrl: "https://developer.clevertap.com/docs/android-in-app#exclude-activities",
+  },
+  {
+    id: "app-t3-post-notifications",
+    scope: "app",
+    platforms: ["android"],
+    tier: 3,
+    title: "Android 13+ notification permission",
+    expected:
+      "Apps targeting API 33+ declare POST_NOTIFICATIONS and ask for it at runtime (e.g. CleverTap's push primer), or pushes are silently blocked.",
+    method: "auto-static",
+    origin: "sdk",
+    docUrl: "https://developer.clevertap.com/docs/push-primer",
   },
   {
     id: "app-t3-uninstall",
@@ -446,6 +500,10 @@ export function tiersForPlatform(platform: Platform): (1 | 2 | 3 | 4)[] {
   const tiers = new Set<number>();
   itemsForPlatform(platform).forEach((i) => tiers.add(i.tier));
   return Array.from(tiers).sort() as (1 | 2 | 3 | 4)[];
+}
+
+export function methodFor(item: ChecklistItem, platform: Platform): CheckMethod {
+  return item.methodByPlatform?.[platform] ?? item.method;
 }
 
 export function getItem(id: string): ChecklistItem | undefined {

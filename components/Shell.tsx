@@ -167,8 +167,8 @@ function UserChip() {
 function ModeHint() {
   return (
     <div className="mb-2 rounded-xl border border-dashed px-3 py-2.5 text-[11px] leading-relaxed text-muted">
-      <span className="font-medium text-text">Preview build.</span> UI only —
-      backend & real analysis are pending sign-off.
+      <span className="font-medium text-text">Android is live.</span> iOS and
+      Web audits are coming next.
     </div>
   );
 }

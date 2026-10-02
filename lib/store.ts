@@ -1,110 +1,149 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import type { Audit, ItemStatus } from "./types";
-import { seedAudits } from "./mock";
 import { itemsForPlatform } from "./checklist";
 
-const KEY = "ct-audit-store-v1";
-
 // ---------------------------------------------------------------------------
-// Tiny localStorage-backed store with a subscription so multiple components
-// stay in sync. All reads/writes are wrapped in try/catch (private windows,
-// blocked storage, SSR).
+// Client-side cache over the /api/audits endpoints, with a subscription so
+// every component showing the same audit stays in sync.
 // ---------------------------------------------------------------------------
 
-let cache: Audit[] | null = null;
+interface State {
+  list?: Audit[];
+  listError?: string;
+  byId: Record<string, Audit | null>; // null = not found
+  errors: Record<string, string>;
+}
+
+let state: State = { byId: {}, errors: {} };
 const listeners = new Set<() => void>();
-const EMPTY: Audit[] = [];
-
-// Pure snapshot for useSyncExternalStore — no listener notifications here.
-function read(): Audit[] {
-  if (cache) return cache;
-  if (typeof window === "undefined") return EMPTY;
-  try {
-    const raw = window.localStorage.getItem(KEY);
-    if (raw) {
-      cache = JSON.parse(raw) as Audit[];
-      return cache;
-    }
-  } catch {
-    /* ignore */
-  }
-  // First run: seed and persist silently (no notify — we're inside a snapshot).
-  cache = seedAudits();
-  try {
-    window.localStorage.setItem(KEY, JSON.stringify(cache));
-  } catch {
-    /* ignore */
-  }
-  return cache;
-}
-
-function write(audits: Audit[]) {
-  cache = audits;
-  try {
-    window.localStorage.setItem(KEY, JSON.stringify(audits));
-  } catch {
-    /* ignore */
-  }
+const set = (patch: Partial<State>) => {
+  state = { ...state, ...patch };
   listeners.forEach((l) => l());
-}
-
-function subscribe(cb: () => void) {
+};
+const subscribe = (cb: () => void) => {
   listeners.add(cb);
   return () => listeners.delete(cb);
-}
+};
+const SERVER_STATE: State = { byId: {}, errors: {} };
 
-// ---- mutations ----
-export function addAudit(a: Audit) {
-  const all = read();
-  write([a, ...all.filter((x) => x.id !== a.id)]);
-}
-
-export function deleteAudit(id: string) {
-  write(read().filter((a) => a.id !== id));
-}
-
-export function getAuditById(id: string): Audit | undefined {
-  return read().find((a) => a.id === id);
-}
-
-export function setItemStatus(auditId: string, itemId: string, status: ItemStatus) {
-  const all = read();
-  const next = all.map((a) => {
-    if (a.id !== auditId) return a;
-    const r = a.results[itemId] ?? { itemId, status };
-    return {
-      ...a,
-      results: {
-        ...a.results,
-        [itemId]: { ...r, status, checkedManually: status === "pass" },
-      },
-    };
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    headers: init?.body ? { "Content-Type": "application/json", ...init.headers } : init?.headers,
+    cache: "no-store",
   });
-  write(next);
+  if (res.status === 204) return undefined as T;
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((json as { error?: string }).error ?? `Request failed (${res.status})`);
+  return json as T;
 }
 
-export function resetStore() {
-  write(seedAudits());
+/* ---- loaders ---- */
+
+export async function refreshAudits() {
+  try {
+    const { audits } = await api<{ audits: Audit[] }>("/api/audits");
+    set({ list: audits, listError: undefined });
+  } catch (e) {
+    set({ listError: (e as Error).message, list: state.list ?? [] });
+  }
 }
 
-// ---- hooks ----
-export function useAudits(): Audit[] {
-  const snap = useSyncExternalStore(
-    subscribe,
-    () => read(),
-    () => EMPTY,
-  );
-  return snap;
+export async function refreshAudit(id: string) {
+  try {
+    const { audit } = await api<{ audit: Audit }>(`/api/audits/${id}`);
+    const errors = { ...state.errors };
+    delete errors[id];
+    set({
+      byId: { ...state.byId, [id]: audit },
+      errors,
+      list: state.list?.map((a) => (a.id === id ? { ...a, ...audit } : a)),
+    });
+    return audit;
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (/not found/i.test(msg)) set({ byId: { ...state.byId, [id]: null } });
+    else set({ errors: { ...state.errors, [id]: msg } });
+    return undefined;
+  }
 }
 
-export function useAudit(id: string): Audit | undefined {
-  const audits = useAudits();
-  return audits.find((a) => a.id === id);
+/* ---- mutations ---- */
+
+export async function deleteAudit(id: string) {
+  await api(`/api/audits/${id}`, { method: "DELETE" });
+  const byId = { ...state.byId };
+  delete byId[id];
+  set({ byId, list: state.list?.filter((a) => a.id !== id) });
 }
 
-// ---- summary helpers ----
+export async function setItemStatus(auditId: string, itemId: string, status: ItemStatus) {
+  // optimistic
+  const a = state.byId[auditId];
+  if (a) {
+    const prev = a.results[itemId];
+    set({
+      byId: {
+        ...state.byId,
+        [auditId]: {
+          ...a,
+          results: {
+            ...a.results,
+            [itemId]: { ...(prev ?? { itemId }), status, checkedManually: status !== "manual" },
+          },
+        },
+      },
+    });
+  }
+  try {
+    await api(`/api/audits/${auditId}/items/${itemId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: status === "pass" || status === "fail" ? status : "manual" }),
+    });
+  } finally {
+    await refreshAudit(auditId);
+  }
+}
+
+/* ---- hooks ---- */
+
+/** All audits (newest first). `undefined` while the first load is in flight. */
+export function useAudits(): Audit[] | undefined {
+  const s = useSyncExternalStore(subscribe, () => state, () => SERVER_STATE);
+  useEffect(() => {
+    refreshAudits();
+  }, []);
+  return s.list;
+}
+
+export function useAuditsError(): string | undefined {
+  return useSyncExternalStore(subscribe, () => state.listError, () => undefined);
+}
+
+const ACTIVE = new Set(["draft", "scanning", "verifying"]);
+
+/**
+ * One audit with polling while a server-side job is running.
+ * `audit === undefined` = loading, `null` = not found.
+ */
+export function useAudit(id: string): { audit: Audit | null | undefined; error?: string } {
+  const s = useSyncExternalStore(subscribe, () => state, () => SERVER_STATE);
+  const audit = s.byId[id];
+  const status = audit?.status;
+  useEffect(() => {
+    refreshAudit(id);
+  }, [id]);
+  useEffect(() => {
+    if (!status || !ACTIVE.has(status)) return;
+    const t = setInterval(() => refreshAudit(id), 2500);
+    return () => clearInterval(t);
+  }, [id, status]);
+  return { audit, error: s.errors[id] };
+}
+
+/* ---- summary helpers ---- */
 export interface AuditSummary {
   total: number;
   counts: Record<ItemStatus, number>;
@@ -115,32 +154,18 @@ export interface AuditSummary {
 
 export function summarize(a: Audit): AuditSummary {
   const items = itemsForPlatform(a.platform);
-  const counts: Record<ItemStatus, number> = {
-    pass: 0,
-    fail: 0,
-    warn: 0,
-    manual: 0,
-    na: 0,
-  };
+  const counts: Record<ItemStatus, number> = { pass: 0, fail: 0, warn: 0, manual: 0, na: 0 };
   for (const it of items) {
-    const st = a.results[it.id]?.status ?? "na";
+    const st = a.results[it.id]?.status ?? "manual";
     counts[st] = (counts[st] ?? 0) + 1;
   }
   const autoScorable = counts.pass + counts.fail + counts.warn;
-  const score =
-    autoScorable === 0 ? 0 : Math.round((counts.pass / autoScorable) * 100);
-  return {
-    total: items.length,
-    counts,
-    autoDone: counts.pass,
-    score,
-    manualPending: counts.manual,
-  };
+  const score = autoScorable === 0 ? 0 : Math.round((counts.pass / autoScorable) * 100);
+  return { total: items.length, counts, autoDone: counts.pass, score, manualPending: counts.manual };
 }
 
 // convenience: know when we're mounted (avoid hydration mismatch for time strings)
+const noopSubscribe = () => () => {};
 export function useMounted() {
-  const [m, setM] = useState(false);
-  useEffect(() => setM(true), []);
-  return m;
+  return useSyncExternalStore(noopSubscribe, () => true, () => false);
 }

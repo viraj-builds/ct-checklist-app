@@ -57,6 +57,10 @@ export function LogSession({
   const [startedAt, setStartedAt] = useState(0);
   const [now, setNow] = useState(0);
   const restoreRef = useRef<(() => Promise<void>) | null>(null);
+  const tickN = useRef(0);
+  const origTag = useRef<string | null>(null); // the phone's own log.tag, restored on Stop
+  // why no CleverTap lines arrived: checked before blaming the build
+  const [zeroCause, setZeroCause] = useState<"" | "checking" | "not-running" | "rehidden" | "sdk-off">("");
   const mark = useRef(0); // log line where the current scenario started
   const savedJson = useRef("");
   const earlier = useRef<LogInsights | undefined>(initial?.logs); // results from previous sessions are kept
@@ -81,6 +85,15 @@ export function LogSession({
     let alive = true;
     const tick = async () => {
       try {
+        if (tickN.current++ % 3 === 0) {
+          const tag = (await driver.run({ t: "getLogTag" })).trim();
+          if (/^[IWEFAS]/i.test(tag)) {
+            // the phone hid debug logs again (vivo changes log.tag on its own) — lift it again
+            if (origTag.current === null) origTag.current = tag;
+            await driver.run({ t: "setLogTag", level: "V" });
+            setRestricted(true);
+          }
+        }
         const next = await read();
         if (!alive) return;
         setIns(mergeInsights(earlier.current, next));
@@ -130,6 +143,46 @@ export function LogSession({
     return () => clearTimeout(t);
   }, [ins, sc, restricted, logging, onSave]);
 
+  // No CleverTap line yet? Find out why before blaming the build.
+  const noLines = active && ins?.lines === 0 && now - startedAt > NO_SDK_LOGS_AFTER_MS;
+  useEffect(() => {
+    if (!noLines || zeroCause) return;
+    let alive = true;
+    void (async () => {
+      setZeroCause("checking");
+      try {
+        if (!(await driver.run({ t: "pidof", pkg })).trim()) {
+          await driver.run({ t: "launch", pkg });
+          if (alive) setZeroCause("not-running");
+          return;
+        }
+        const marker = Math.random().toString(36).slice(2, 10);
+        if (!(await driver.run({ t: "logProbe", marker })).includes(`V/CTAuditProbe`)) {
+          if (origTag.current === null) origTag.current = (await driver.run({ t: "getLogTag" })).trim();
+          await driver.run({ t: "setLogTag", level: "V" });
+          await driver.run({ t: "forceStop", pkg });
+          await driver.run({ t: "launch", pkg });
+          if (alive) setZeroCause("rehidden");
+          return;
+        }
+        if (alive) setZeroCause("sdk-off");
+      } catch {
+        if (alive) setZeroCause("");
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [noLines, zeroCause, driver, pkg]);
+  // after a fix attempt, look again if still nothing arrives
+  useEffect(() => {
+    if (zeroCause !== "not-running" && zeroCause !== "rehidden") return;
+    const t = setTimeout(() => setZeroCause(""), 20_000);
+    return () => clearTimeout(t);
+  }, [zeroCause]);
+  // lines arrived → forget the diagnosis
+  if (zeroCause && zeroCause !== "checking" && ins && ins.lines > 0) setZeroCause("");
+
   // a clock for the "no SDK logs yet" hint
   useEffect(() => {
     if (!active) return;
@@ -141,6 +194,7 @@ export function LogSession({
   useEffect(
     () => () => {
       void restoreRef.current?.();
+      if (origTag.current !== null) void driver.run({ t: "setLogTag", level: origTag.current }).catch(() => {});
     },
     [driver],
   );
@@ -179,6 +233,10 @@ export function LogSession({
     setWaiting("");
     await restoreRef.current?.();
     restoreRef.current = null;
+    if (origTag.current !== null) {
+      await driver.run({ t: "setLogTag", level: origTag.current }).catch(() => {});
+      origTag.current = null;
+    }
   }
 
   async function relaunch() {
@@ -265,7 +323,16 @@ export function LogSession({
         </Hint>
       )}
       {active && locked && <Hint title="Unlock the phone">Keep it unlocked with the screen on — in-apps and taps can&apos;t happen on the lock screen.</Hint>}
-      {active && logging?.status !== "blocked" && ins?.lines === 0 && now - startedAt > NO_SDK_LOGS_AFTER_MS && (
+      {active && noLines && zeroCause === "not-running" && (
+        <Hint title="The app wasn't running">We opened it again on the phone. Keep it open — logs should appear in a few seconds.</Hint>
+      )}
+      {active && noLines && zeroCause === "rehidden" && (
+        <Hint title="The phone hid the logs again">
+          Some phones (vivo) switch debug logs off by themselves. We switched them back on and restarted the app — logs should appear in a few
+          seconds.
+        </Hint>
+      )}
+      {active && logging?.status !== "blocked" && noLines && zeroCause === "sdk-off" && (
         <Hint tone="fail" title="The app isn't printing CleverTap logs">
           The phone shows logs, but this build has CleverTap logging off. Add this before CleverTap starts, install that build, then press Start
           again: Android <code className="font-mono">CleverTapAPI.setDebugLevel(CleverTapAPI.LogLevel.VERBOSE)</code> · Flutter{" "}

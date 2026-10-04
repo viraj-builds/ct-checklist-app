@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Icon, type IconName } from "./Icon";
 import { ThemeToggle } from "./ThemeToggle";
 import { cx } from "@/lib/format";
@@ -50,6 +50,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname.startsWith(href);
+
+  // The sign-in page renders without the app chrome.
+  if (pathname === "/login") return <>{children}</>;
 
   return (
     <div className="flex min-h-full">
@@ -128,8 +131,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
         <footer className="border-t px-4 py-4 text-center text-xs text-muted-2 md:px-8">
-          Integration Audit · Internal prototype · Frontend preview (mock data —
-          no live analysis yet)
+          Integration Audit · Android audits live · iOS & Web coming next
         </footer>
       </div>
     </div>
@@ -151,15 +153,33 @@ function Brand() {
 }
 
 function UserChip() {
+  const [user, setUser] = useState<{ email: string; isStaff: boolean } | null>(null);
+  useEffect(() => {
+    fetch("/api/me", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => setUser(j?.user ?? null))
+      .catch(() => {});
+  }, []);
+
+  async function signOut() {
+    await fetch("/api/me", { method: "DELETE" }).catch(() => {});
+    window.location.href = "/login";
+  }
+
   return (
     <div className="mt-3 flex items-center gap-2.5 rounded-xl border bg-surface-2 px-3 py-2.5">
-      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent-soft text-accent">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent">
         <Icon name="user" size={16} />
       </span>
-      <div className="min-w-0 leading-tight">
-        <div className="truncate text-xs font-medium">you@clevertap.com</div>
-        <div className="text-[11px] text-muted">Engineer</div>
+      <div className="min-w-0 flex-1 leading-tight">
+        <div className="truncate text-xs font-medium">{user?.email ?? "…"}</div>
+        <div className="text-[11px] text-muted">{user ? (user.isStaff ? "CleverTap engineer" : "Customer") : ""}</div>
       </div>
+      {user && (
+        <button onClick={signOut} className="shrink-0 text-[11px] font-medium text-muted hover:text-text" title="Sign out">
+          Sign out
+        </button>
+      )}
     </div>
   );
 }

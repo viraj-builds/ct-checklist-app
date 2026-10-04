@@ -5,10 +5,12 @@ import { useRouter } from "next/navigation";
 import { useAudit, summarize, setItemStatus, deleteAudit, useMounted, api, refreshAudit } from "@/lib/store";
 import { itemsForPlatform, methodFor, TIER_LABELS } from "@/lib/checklist";
 import { getFaq } from "@/lib/faq";
-import { PLATFORM_META, MODE_META, STATUS_META, METHOD_META, REGIONS, LIVE_GUIDE, DOCS_HELP } from "@/lib/meta";
+import { PLATFORM_META, MODE_META, STATUS_META, METHOD_META, REGIONS, LIVE_GUIDE, DOCS_HELP, HOW_TO_CHECK, ANDROID_NOTES, STATUS_LEGEND } from "@/lib/meta";
 import type { Audit, ChecklistItem, ItemResult, ItemStatus, Platform } from "@/lib/types";
 import type { AndroidScanReport } from "@/lib/analyzer/types";
-import { recallPasscode, rememberPasscode } from "@/lib/session-secrets";
+import { rememberPasscode, useSecrets } from "@/lib/session-secrets";
+import { DeviceLab } from "./DeviceLab";
+import { CriticalEvents } from "./CriticalEvents";
 import { Card, Button, ProgressRing, StatusBadge, MethodBadge, PlatformIcon, StatBar, EmptyState, Badge } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 import { formatDate, formatBytes, cx } from "@/lib/format";
@@ -203,50 +205,75 @@ export function Results({ id }: { id: string }) {
       {/* What the scan found */}
       {audit.scan && <ScanSummary scan={audit.scan} audit={audit} />}
 
-      {/* What needs to be done */}
+      {/* What needs to be done — failures and warnings kept apart */}
       {issues.length > 0 && (
         <Card className="p-5">
-          <div className="mb-3 flex items-center gap-2">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
             <Icon name="alert" size={18} className="text-[var(--fail)]" />
             <h2 className="font-semibold">What needs to be done ({issues.length})</h2>
           </div>
-          <div className="space-y-2">
-            {issues.map((it) => {
-              const r = resultOf(it.id)!;
-              return (
-                <div key={it.id} className="flex items-start gap-3 rounded-xl border bg-surface-2 p-3">
-                  <StatusBadge status={r.status} size="sm" />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium">
-                      {it.title}
-                      {r.detected && <span className="font-normal text-muted"> — {r.detected}</span>}
-                    </div>
-                    {(r.remediation || r.evidence) && (
-                      <div className="mt-0.5 text-xs text-muted">{r.remediation ?? r.evidence}</div>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => {
-                      setFilter("all");
-                      setOpenId(it.id);
-                      setTimeout(
-                        () => document.getElementById(`item-${it.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }),
-                        50,
-                      );
-                    }}
-                    className="shrink-0 text-xs font-medium text-brand hover:underline"
-                  >
-                    View
-                  </button>
+          {(["fail", "warn"] as const).map((group) => {
+            const list = issues.filter((it) => statusOf(it.id) === group);
+            if (!list.length) return null;
+            return (
+              <div key={group} className="mb-4 last:mb-0">
+                <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide" style={{ color: STATUS_META[group].token }}>
+                  {group === "fail" ? `Must fix (${list.length})` : `Should check (${list.length})`}
+                  <span className="font-normal normal-case tracking-normal text-muted">
+                    {STATUS_LEGEND.find((l) => l.status === group)?.text}
+                  </span>
                 </div>
-              );
-            })}
-          </div>
+                <div className="space-y-2">
+                  {list.map((it) => {
+                    const r = resultOf(it.id)!;
+                    return (
+                      <div key={it.id} className="flex items-start gap-3 rounded-xl border bg-surface-2 p-3">
+                        <StatusBadge status={r.status} size="sm" />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-medium">
+                            {it.title}
+                            {r.detected && <span className="font-normal text-muted"> — {r.detected}</span>}
+                          </div>
+                          {(r.remediation || r.evidence) && <div className="mt-0.5 text-xs text-muted">{r.remediation ?? r.evidence}</div>}
+                        </div>
+                        <button
+                          onClick={() => {
+                            setFilter("all");
+                            setOpenId(it.id);
+                            setTimeout(() => document.getElementById(`item-${it.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+                          }}
+                          className="shrink-0 text-xs font-medium text-brand hover:underline"
+                        >
+                          View
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+          <details className="mt-3 text-xs text-muted">
+            <summary className="cursor-pointer font-medium">What the statuses mean</summary>
+            <ul className="mt-1.5 space-y-1">
+              {STATUS_LEGEND.map((l) => (
+                <li key={l.status} className="flex items-start gap-2">
+                  <StatusBadge status={l.status} size="sm" /> <span>{l.text}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
         </Card>
       )}
 
-      {/* API + test push */}
+      {/* API checks */}
       {audit.platform === "android" && audit.accountId && <ApiPanel audit={audit} />}
+
+      {/* Business-critical events (editable) */}
+      {audit.platform === "android" && <CriticalEvents audit={audit} />}
+
+      {/* Live device: USB / Wi-Fi / no cable */}
+      {audit.platform === "android" && audit.accountId && <DeviceLab audit={audit} />}
 
       {/* Live-device guided checklist */}
       {manualItems.length > 0 && (
@@ -457,58 +484,29 @@ function DetailList({ title, rows }: { title: string; rows: string[] }) {
   );
 }
 
-/* ---------------- API panel: re-verify + test push ---------------- */
+/* ---------------- API panel: run / re-run checks ---------------- */
 
 function ApiPanel({ audit }: { audit: Audit }) {
-  const scan = audit.scan;
-  const [passcode, setPasscode] = useState(() => recallPasscode(audit.id) ?? "");
-  const [identity, setIdentity] = useState("");
-  const [channelId, setChannelId] = useState(
-    () => scan?.channelIds[0] ?? scan?.manifest.metaData.CLEVERTAP_DEFAULT_CHANNEL_ID ?? scan?.apis.androidChannel.strings[0] ?? "",
-  );
-  const firstLink = scan?.manifest.deepLinks.find((d) => !/^(com\.google|com\.facebook|com\.clevertap)/.test(d.activity));
-  const [deepLink, setDeepLink] = useState(firstLink ? `${firstLink.scheme}://${firstLink.host ?? ""}${firstLink.path ?? ""}` : "");
-  const [busy, setBusy] = useState<"" | "verify" | "send" | "confirm">("");
+  const { passcode } = useSecrets(audit.id);
+  const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
-  const push = audit.api?.testPush;
-  const apiOk = audit.api?.ok;
+  const a = audit.api;
+  const push = a?.messages?.push;
+  const inapp = a?.messages?.inapp;
 
-  async function act(kind: "verify" | "send" | "confirm") {
-    setBusy(kind);
+  async function verify() {
+    setBusy(true);
     setMsg(null);
-    rememberPasscode(audit.id, passcode);
     try {
-      if (kind === "verify") {
-        const r = await api<{ ok: boolean; error?: string }>(`/api/audits/${audit.id}/verify`, {
-          method: "POST",
-          body: JSON.stringify({ passcode }),
-        });
-        setMsg(r.ok ? { tone: "ok", text: "API checks updated." } : { tone: "err", text: r.error ?? "Verification failed." });
-      } else if (kind === "send") {
-        const r = await api<{ testPush: { status: string; message?: string } }>(`/api/audits/${audit.id}/test-push`, {
-          method: "POST",
-          body: JSON.stringify({ passcode, identity, channelId: channelId || undefined, deepLink: deepLink || undefined }),
-        });
-        setMsg(
-          r.testPush.status === "failed"
-            ? { tone: "err", text: r.testPush.message ?? "CleverTap rejected the push." }
-            : { tone: "ok", text: "Push queued. Wait for it on the device, then press “Check delivery”." },
-        );
-      } else {
-        const r = await api<{ testPush: { status: string; clicked?: boolean } }>(`/api/audits/${audit.id}/test-push/confirm`, {
-          method: "POST",
-          body: JSON.stringify({ passcode, identity }),
-        });
-        setMsg(
-          r.testPush.status === "confirmed"
-            ? { tone: "ok", text: `Delivered and viewed${r.testPush.clicked ? " — and clicked" : ""}.` }
-            : { tone: "err", text: "No Notification Viewed event yet. Events can take a minute — try again shortly." },
-        );
-      }
+      const r = await api<{ ok: boolean; error?: string }>(`/api/audits/${audit.id}/verify`, {
+        method: "POST",
+        body: JSON.stringify({ passcode }),
+      });
+      setMsg(r.ok ? { tone: "ok", text: "API checks updated." } : { tone: "err", text: r.error ?? "Verification failed." });
     } catch (e) {
       setMsg({ tone: "err", text: (e as Error).message });
     } finally {
-      setBusy("");
+      setBusy(false);
       refreshAudit(audit.id);
     }
   }
@@ -518,58 +516,46 @@ function ApiPanel({ audit }: { audit: Audit }) {
       <div className="border-b bg-surface-2 px-5 py-4">
         <div className="flex flex-wrap items-center gap-2">
           <Icon name="key" size={17} className="text-accent" />
-          <h2 className="font-semibold">CleverTap API checks & test push</h2>
-          {audit.api ? (
-            apiOk ? (
-              <Badge tone="success">Verified {formatDate(audit.api.checkedAt)}</Badge>
-            ) : (
-              <Badge tone="danger">{audit.api.error}</Badge>
-            )
+          <h2 className="font-semibold">CleverTap API checks</h2>
+          {a?.ok ? (
+            <Badge tone="success">Verified {formatDate(a.checkedAt)}</Badge>
+          ) : a && a.error !== "Not verified yet" ? (
+            <Badge tone="danger">Failed: {a.error}</Badge>
           ) : (
             <Badge tone="neutral">Not run</Badge>
           )}
         </div>
         <p className="mt-1 text-sm text-muted">
-          The passcode stays in this tab&apos;s memory only. Test pushes go to the single identity you enter.
+          Reads events, profiles and campaign stats from your account. The passcode stays in this tab&apos;s memory only.
         </p>
       </div>
-      <div className="grid gap-5 p-5 md:grid-cols-2">
-        <div className="space-y-3">
-          <MiniField label="Passcode">
-            <input type="password" value={passcode} onChange={(e) => setPasscode(e.target.value)} className="input font-mono" placeholder="••••••••" />
-          </MiniField>
-          <Button size="sm" variant="secondary" icon="refresh" disabled={passcode.length < 3 || !!busy} onClick={() => act("verify")}>
-            {busy === "verify" ? "Verifying…" : audit.api ? "Re-run API checks" : "Run API checks"}
-          </Button>
-        </div>
-        <div className="space-y-3">
-          <MiniField label="Test identity (a profile on your test device)">
-            <input value={identity} onChange={(e) => setIdentity(e.target.value)} className="input font-mono" placeholder="e.g. test_user_01" />
-          </MiniField>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <MiniField label="Channel ID">
-              <input value={channelId} onChange={(e) => setChannelId(e.target.value)} className="input font-mono" placeholder="channel id" />
-            </MiniField>
-            <MiniField label="Deep link (optional)">
-              <input value={deepLink} onChange={(e) => setDeepLink(e.target.value)} className="input font-mono" placeholder="myapp://home" />
-            </MiniField>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" icon="bell" disabled={passcode.length < 3 || !identity || !!busy} onClick={() => act("send")}>
-              {busy === "send" ? "Sending…" : "Send test push"}
-            </Button>
-            {push && push.status !== "failed" && (
-              <Button size="sm" variant="secondary" icon="check" disabled={passcode.length < 3 || !identity || !!busy} onClick={() => act("confirm")}>
-                {busy === "confirm" ? "Checking…" : "Check delivery"}
-              </Button>
-            )}
-            {push && (
-              <span className="text-xs text-muted">
-                Last: {push.identity} · {push.status} · {formatDate(push.sentAt)}
+      <div className="flex flex-wrap items-end gap-3 p-5">
+        <MiniField label="Passcode">
+          <input
+            type="password"
+            autoComplete="new-password"
+            data-1p-ignore
+            data-lpignore="true"
+            value={passcode}
+            onChange={(e) => rememberPasscode(audit.id, e.target.value)}
+            className="input w-64 font-mono"
+            placeholder="••••••••"
+          />
+        </MiniField>
+        <Button size="sm" variant="secondary" icon="refresh" disabled={passcode.length < 3 || busy} onClick={verify}>
+          {busy ? "Verifying… (up to a minute)" : a?.ok ? "Re-run API checks" : "Run API checks"}
+        </Button>
+        {a?.ok && (
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+            {a.realtime && <span>Android users online now: <b className="text-text">{a.realtime.android}</b></span>}
+            {push && !push.error && (
+              <span>
+                Push (30 d): {push.sent} sent · {push.viewed} viewed · {push.clicked} clicked
               </span>
             )}
+            {inapp && <span>In-app (30 d): {inapp.viewed} viewed</span>}
           </div>
-        </div>
+        )}
       </div>
       {msg && (
         <div
@@ -611,14 +597,14 @@ function LiveDevicePanel({
       <div className="border-b bg-surface-2 px-5 py-4">
         <div className="flex items-center gap-2">
           <Icon name="terminal" size={18} style={{ color: "var(--manual)" }} />
-          <h2 className="font-semibold">Live-device checklist</h2>
+          <h2 className="font-semibold">Still to confirm by hand</h2>
           <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: "var(--manual-soft)", color: "var(--manual)" }}>
             {items.length} to verify
           </span>
         </div>
         <p className="mt-1 text-sm text-muted">
-          These happen on the physical screen, so no engine can see them. Run the app on a device with verbose logging and
-          tick each one.
+          Items marked <b style={{ color: "var(--pass)" }}>Automatic</b> tick themselves when you run that step with the phone connected.
+          Only tick by hand what you checked yourself.
         </p>
       </div>
 
@@ -657,6 +643,16 @@ function LiveDevicePanel({
                     <span className="text-sm font-medium">{it.title}</span>
                     <StatusBadge status={st} size="sm" />
                   </div>
+                  {HOW_TO_CHECK[it.id] && (
+                    <p className="mt-1 text-xs text-muted">
+                      {HOW_TO_CHECK[it.id].auto && (
+                        <span className="mr-1 font-semibold" style={{ color: "var(--pass)" }}>
+                          Automatic ·
+                        </span>
+                      )}
+                      {HOW_TO_CHECK[it.id].how}
+                    </p>
+                  )}
                   <div className="mt-2 flex items-center gap-1.5">
                     <button
                       onClick={() => onSet(it.id, "pass")}
@@ -691,6 +687,23 @@ function LiveDevicePanel({
 }
 
 /* ---------------- item row ---------------- */
+
+function HowToCheck({ id }: { id: string }) {
+  const h = HOW_TO_CHECK[id];
+  return (
+    <div className="rounded-xl border p-3.5" style={{ background: h.auto ? "var(--pass-soft)" : "var(--manual-soft)" }}>
+      <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold" style={{ color: h.auto ? "var(--pass)" : "var(--manual)" }}>
+        <Icon name={h.auto ? "zap" : "clock"} size={13} /> {h.auto ? "How to check — automatic" : "How to check"}
+      </div>
+      <p className="text-sm text-text">{h.how}</p>
+      {h.auto && (
+        <a href="#live-device" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline">
+          Go to Live device testing <Icon name="arrowRight" size={12} />
+        </a>
+      )}
+    </div>
+  );
+}
 
 function ItemRow({
   item,
@@ -755,6 +768,18 @@ function ItemRow({
         <div className="animate-fade-in space-y-4 border-t px-4 py-4 sm:pl-[52px]">
           <Detail label="Expected">{item.expected}</Detail>
           {result?.evidence && <Detail label="What we found">{result.evidence}</Detail>}
+          {HOW_TO_CHECK[item.id] && status !== "pass" && status !== "na" && <HowToCheck id={item.id} />}
+          {platform === "android" && ANDROID_NOTES[item.id] && (
+            <div className="rounded-xl border bg-surface-2 p-3.5">
+              <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-muted">
+                <Icon name="alert" size={13} /> Android limits (CleverTap docs)
+              </div>
+              <p className="text-sm text-text">{ANDROID_NOTES[item.id].text}</p>
+              <a href={ANDROID_NOTES[item.id].url} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline">
+                CleverTap docs <Icon name="external" size={12} />
+              </a>
+            </div>
+          )}
           {result?.details && result.details.length > 0 && (
             <Detail label="Details">
               <ul className="mt-1 space-y-0.5 font-mono text-[12px] text-muted">

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getAudit, saveScan } from "@/lib/server/audits";
+import { getAuditFor, saveScan } from "@/lib/server/audits";
 import { auditId, body, handle, HttpError } from "@/lib/server/http";
 import type { AndroidScanReport } from "@/lib/analyzer/types";
 
@@ -39,10 +39,10 @@ const Report = z.looseObject({
   notes: z.array(z.string().max(500)).max(30),
 });
 
-export const POST = handle(async (req: Request, ctx: RouteContext<"/api/audits/[id]/scan">) => {
+export const POST = handle(async (req, ctx: RouteContext<"/api/audits/[id]/scan">, user) => {
   const id = auditId((await ctx.params).id);
-  const audit = await getAudit(id);
-  if (!audit) throw new HttpError(404, "Audit not found");
+  const audit = await getAuditFor(id, user);
+  if (audit.scan) throw new HttpError(409, "This audit already has a scan — start a new audit.");
   if (audit.source !== "browser") throw new HttpError(409, "This audit expects an uploaded file.");
   const report = (await body(req, Report, 1024 * 1024)) as unknown as AndroidScanReport;
   await saveScan(id, report);

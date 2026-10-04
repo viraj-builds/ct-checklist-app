@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { AUDIT_ID } from "./audits";
+import { currentUser, type SessionUser } from "./auth";
 
 export class HttpError extends Error {
   constructor(
@@ -11,18 +11,42 @@ export class HttpError extends Error {
   }
 }
 
-/** Wrap a route handler: HttpError -> JSON error, anything else -> 500. */
-export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response>) {
-  return async (...args: A): Promise<Response> => {
+const UNSAFE = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/**
+ * Wrap an authenticated route handler:
+ *  - rejects cross-site writes (Origin must match the host) — CSRF defence on
+ *    top of SameSite=Lax session cookies
+ *  - requires a signed-in user and passes it to the handler
+ *  - HttpError -> JSON error; anything else -> generic 500 (details only in logs)
+ */
+export function handle<C = unknown>(fn: (req: Request, ctx: C, user: SessionUser) => Promise<Response>) {
+  return async (req: Request, ctx: C): Promise<Response> => {
     try {
-      return await fn(...args);
+      if (UNSAFE.has(req.method)) assertSameOrigin(req);
+      const user = await currentUser();
+      if (!user) throw new HttpError(401, "Please sign in.");
+      return await fn(req, ctx, user);
     } catch (e) {
       if (e instanceof HttpError) return Response.json({ error: e.message }, { status: e.status });
       console.error(e);
-      const msg = e instanceof Error ? e.message : "Internal error";
-      return Response.json({ error: msg }, { status: 500 });
+      const detail = process.env.NODE_ENV !== "production" && e instanceof Error ? e.message : undefined;
+      return Response.json({ error: detail ?? "Something went wrong. Please try again." }, { status: 500 });
     }
   };
+}
+
+function assertSameOrigin(req: Request) {
+  const origin = req.headers.get("origin");
+  if (!origin) return; // non-browser clients; cookies still required
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+  let originHost = "";
+  try {
+    originHost = new URL(origin).host;
+  } catch {
+    /* malformed */
+  }
+  if (!host || originHost !== host) throw new HttpError(403, "Cross-site request blocked.");
 }
 
 export async function body<T>(req: Request, schema: z.ZodType<T>, maxBytes = 64 * 1024): Promise<T> {
@@ -44,6 +68,8 @@ export async function body<T>(req: Request, schema: z.ZodType<T>, maxBytes = 64 
   }
   return parsed.data;
 }
+
+export const AUDIT_ID = /^aud_[a-f0-9]{32}$/;
 
 export function auditId(id: string): string {
   if (!AUDIT_ID.test(id)) throw new HttpError(404, "Audit not found");

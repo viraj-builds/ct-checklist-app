@@ -114,6 +114,14 @@ export interface ProfileRecord {
   platformInfo?: { platform?: string; push_token?: string; app_version?: string; objectId?: string }[];
 }
 
+// Cursors come back already URL-encoded (e.g. "...%2F..."). Encoding them a
+// second time makes CleverTap reply "Incorrect Usage" (malformed cursor).
+function cursorParam(cursor: string) {
+  return cursor.includes("%") ? cursor : encodeURIComponent(cursor);
+}
+
+const isIncorrectUsage = (e: unknown) => e instanceof CtApiError && /incorrect usage/i.test(e.message);
+
 /**
  * Get Events (cursor flow). Returns at most one batch — enough to sample.
  * `to` may not be in the future in the account's timezone; on error 4002 we
@@ -135,7 +143,7 @@ export async function sampleEvents(
     );
     const cursor = start.cursor as string | undefined;
     if (!cursor) return [];
-    const page = await call(creds, "GET", `/1/events.json?cursor=${encodeURIComponent(cursor)}`);
+    const page = await call(creds, "GET", `/1/events.json?cursor=${cursorParam(cursor)}`);
     return (page.records as EventRecord[] | undefined) ?? [];
   };
   try {
@@ -143,6 +151,7 @@ export async function sampleEvents(
   } catch (e) {
     if (e instanceof CtApiError && (e.code === 4002 || /future/i.test(e.message)))
       return run(new Date(Date.now() - 86400_000));
+    if (isIncorrectUsage(e)) return run(new Date()); // stale cursor: restart from step 1 once
     throw e;
   }
 }
@@ -154,17 +163,94 @@ export async function sampleProfiles(
   days: number,
   batchSize: number,
 ): Promise<ProfileRecord[]> {
-  const range = dateRange(days, new Date(Date.now() - 86400_000));
-  const start = await call(
-    creds,
-    "POST",
-    `/1/profiles.json?batch_size=${batchSize}&app=true&events=false&profile=true`,
-    { event_name: eventName, ...range },
-  );
-  const cursor = start.cursor as string | undefined;
-  if (!cursor) return [];
-  const page = await call(creds, "GET", `/1/profiles.json?cursor=${encodeURIComponent(cursor)}`);
-  return (page.records as ProfileRecord[] | undefined) ?? [];
+  const run = async () => {
+    const range = dateRange(days, new Date(Date.now() - 86400_000));
+    const start = await call(
+      creds,
+      "POST",
+      `/1/profiles.json?batch_size=${batchSize}&app=true&events=false&profile=true`,
+      { event_name: eventName, ...range },
+    );
+    const cursor = start.cursor as string | undefined;
+    if (!cursor) return [];
+    const page = await call(creds, "GET", `/1/profiles.json?cursor=${cursorParam(cursor)}`);
+    return (page.records as ProfileRecord[] | undefined) ?? [];
+  };
+  try {
+    return await run();
+  } catch (e) {
+    if (isIncorrectUsage(e)) return run();
+    throw e;
+  }
+}
+
+export interface ProfileDetail extends ProfileRecord {
+  events?: Record<string, { count?: number; first_seen?: number; last_seen?: number }>;
+}
+
+/** Get one user's profile by Identity (or email). `null` when no such profile. */
+export async function getProfile(creds: CtCredentials, identity: string): Promise<ProfileDetail | null> {
+  const key = identity.includes("@") ? "email" : "identity";
+  try {
+    const res = await call(creds, "GET", `/1/profile.json?${key}=${encodeURIComponent(identity)}`);
+    return (res.record as ProfileDetail | null) ?? null;
+  } catch (e) {
+    if (e instanceof CtApiError && (e.httpStatus === 404 || /not found/i.test(e.message))) return null;
+    throw e;
+  }
+}
+
+export interface MessageReport {
+  name: string;
+  channel: string; // "Push", "InApp", ...
+  status: string;
+  devices: string[];
+  sent: number;
+  viewed: number;
+  clicked: number;
+}
+
+/** Get Message Reports: campaigns sent in the window with sent/viewed/clicked totals. */
+export async function getMessageReports(creds: CtCredentials, days: number, channels: string[]): Promise<MessageReport[]> {
+  const { from, to } = dateRange(days, new Date(Date.now() - 86400_000));
+  const res = await call(creds, "POST", "/1/message/report.json", {
+    from: String(from),
+    to: String(to),
+    channel: channels,
+    daily: false,
+  });
+  type Raw = {
+    message_name?: string;
+    channel?: string;
+    status?: string;
+    device?: string[];
+    data?: unknown;
+  };
+  return ((res.messages as Raw[] | undefined) ?? []).map((m) => {
+    const t = { sent: 0, viewed: 0, clicked: 0 };
+    // `data` is an array (or array of arrays) of {sent, viewed, clicked}
+    const walk = (x: unknown) => {
+      if (Array.isArray(x)) x.forEach(walk);
+      else if (x && typeof x === "object") {
+        const o = x as Record<string, unknown>;
+        for (const k of ["sent", "viewed", "clicked"] as const) if (typeof o[k] === "number") t[k] += o[k] as number;
+      }
+    };
+    walk(m.data);
+    return {
+      name: String(m.message_name ?? ""),
+      channel: String(m.channel ?? ""),
+      status: String(m.status ?? ""),
+      devices: m.device ?? [],
+      ...t,
+    };
+  });
+}
+
+/** Real-Time Counts: users active in the last 5 minutes, by OS. */
+export async function getRealtime(creds: CtCredentials): Promise<{ count: number; os: Record<string, number> }> {
+  const res = await call(creds, "POST", "/1/now.json", { os: true });
+  return { count: Number(res.count ?? 0), os: (res.os as Record<string, number>) ?? {} };
 }
 
 /** Send a push to specific identities (Create Campaign API, by identity). */
@@ -177,7 +263,7 @@ export async function sendPushToIdentity(
   if (opts.channelId) android.wzrk_cid = opts.channelId;
   if (opts.deepLink) android.deep_link = opts.deepLink;
   const res = await call(creds, "POST", "/1/send/push.json", {
-    to: { Identity: [identity] },
+    to: identity.includes("@") ? { Email: [identity] } : { Identity: [identity] },
     tag_group: "integration-audit-test",
     respect_frequency_caps: false,
     content: { title: opts.title, body: opts.body, platform_specific: { android } },

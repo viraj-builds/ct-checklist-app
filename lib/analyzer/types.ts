@@ -31,7 +31,8 @@ export type ApiKey =
   | "lifecycleRegister"
   | "getInstance"
   | "changeCredentials"
-  | "setDebugLevel";
+  | "setDebugLevel"
+  | "pushClickedEvent"; // Android 12+ onNewIntent → pushNotificationClickedEvent
 
 export interface ApiUsage {
   // true = call observed, false = searched and not found, null = can't tell
@@ -75,6 +76,9 @@ export interface AndroidScanReport {
     applicationClass?: string;
     debuggable: boolean;
     launcherActivity?: string;
+    // superclass chain of the launcher activity; fragment=false means in-app
+    // header/footer + App Inbox can't render (CleverTap needs a FragmentActivity)
+    launcherHost?: { chain: string[]; fragment: boolean | null };
     activityCount: number;
     dexCount: number;
     abis: string[];
@@ -114,6 +118,7 @@ export interface AndroidScanReport {
     messagingSdk: boolean;
     googleServicesConfigured: boolean; // google-services plugin resources present
     installReferrer: boolean;
+    analyticsSdk: boolean; // Firebase Analytics — needed for real-time uninstall tracking
   };
 
   apis: Record<ApiKey, ApiUsage>;

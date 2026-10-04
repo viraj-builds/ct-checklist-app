@@ -1,0 +1,286 @@
+CLEVERTAP C4S INTEGRATION AUDIT — DEMO & HOW-IT-WORKS GUIDE (Android)
+======================================================================
+
+1. WHAT IT IS
+-------------
+A web app that audits a customer's CleverTap Android integration against the C4S checklist
+(30 items) and says, per item: Pass / Fail / Warning / Manual / N/A, with evidence and the fix.
+Works for any Android build: native (Java/Kotlin), Flutter, React Native, Cordova/Ionic,
+Unity and .NET MAUI/Xamarin. iOS and Web are planned later.
+
+It decides each item from up to four sources, in this order of strength:
+  1. Live phone   - what the SDK actually did on a real device (strongest proof)
+  2. CleverTap API - real data already in the customer's account (events, profiles, reports)
+  3. APK scan     - what is in the build (code calls, manifest, permissions, SDK version)
+  4. Manual       - the user ticks it (only for things nothing can see, e.g. dashboard toggles)
+
+
+2. TECH STACK
+-------------
+Frontend + backend : Next.js 16 (App Router, React 19, TypeScript), Tailwind CSS 4
+Hosting            : Vercel (serverless functions + daily cron)
+Database & login   : Supabase (Postgres + Supabase Auth). Row-level security on, server-only key.
+Validation         : zod (every API input is validated)
+APK scanning       : runs IN THE USER'S BROWSER in a Web Worker
+                     - fflate (unzip), own parsers for AndroidManifest (binary XML / protobuf),
+                       DEX bytecode, Flutter libapp.so, React Native / Cordova JS bundles
+Phone over USB     : WebUSB + ADB in the browser (@yume-chan/adb) — Chrome / Edge only
+Phone over Wi-Fi   : small local helper "ct-device-bridge.mjs" (Node.js, no dependencies)
+                     that uses the computer's own adb
+CleverTap data     : CleverTap REST API (events, profiles, message reports, realtime, send push)
+Rules engine       : lib/engine/android.ts — pure function: (scan, API, phone, logs) -> results
+
+
+3. HOW IT WORKS (FLOW)
+----------------------
+a) New audit: name, Account ID, region, (optional) passcode, upload APK/AAB/APKS/XAPK,
+   optional "business-critical events" (3–4 key events, exact names).
+b) APK is scanned in the browser. The file never leaves the user's computer — only the
+   findings (a small JSON report) are saved.
+c) CleverTap API checks run on the server with the passcode (sampled events/profiles,
+   push/in-app campaign stats, realtime counts).
+d) Report shows score + "Must fix" (fails) + "Should check" (warnings) + every item.
+e) Live device testing (optional but recommended) proves push, deep links, login etc.
+f) Re-run anytime: results only go up when new proof arrives; a re-test that genuinely
+   fails lowers it. Earlier proof is never thrown away by reconnecting / new sessions.
+
+
+4. LOGIN & ACCESS
+-----------------
+- Sign in with Google, or "Email me a link" (magic link). No passwords.
+- CleverTap staff = verified email on the staff domain (clevertap.com): can see ALL audits.
+- Customers see only the audits they created.
+- Signed-out visitors are redirected to /login (except /login, /checklist, /faq and the
+  helper file download).
+
+
+5. SECURITY & PRIVACY (good demo talking points)
+------------------------------------------------
+- APK never uploaded; scanned locally in the browser ("Checked right here in your browser").
+- CleverTap passcode is NEVER stored — it lives only in that browser tab's memory.
+- Account token in the manifest is masked before saving.
+- Push tokens / long IDs in logs are redacted before saving; profile values reduced to key names.
+- Phone commands are a fixed whitelist (no free text shell); inputs validated; 30 s timeout.
+- Helper listens on 127.0.0.1 only, answers only the audit site's origin, fixed command list.
+- Rate limits per user, CSRF origin check, strict security headers (CSP, HSTS…).
+- Phone settings changed for a test (e.g. vivo "log.tag") are always put back afterwards.
+- Daily cron cleans up abandoned drafts.
+
+
+6. STEP-BY-STEP USER FLOW (what the customer does)
+--------------------------------------------------
+1. Sign in.
+2. New audit → Android → enter Account ID + region (+ passcode for API checks).
+3. Upload the NORMAL RELEASE build they ship (no special build needed for the scan).
+4. Optional: list business-critical events (e.g. "Product Viewed, Added To Cart, Charged").
+5. Read the report. Fix "Must fix" items first.
+6. Live device testing (Section 7) to turn most Manual items into Pass/Fail automatically.
+7. Tick the 2 dashboard-only items by hand (Uninstall tracking, Session analytics).
+
+For live log checks the phone needs a build with CleverTap DEBUG LOGS ON:
+  Android : CleverTapAPI.setDebugLevel(CleverTapAPI.LogLevel.VERBOSE)
+  Flutter : CleverTapPlugin.setDebugLevel(3)
+  RN      : CleverTap.setDebugLevel(3)
+(Typically a debug/QA build. If logs are off, the page says so and shows this line.)
+
+
+7. LIVE DEVICE TESTING
+----------------------
+Prerequisites (phone):
+  - Same app installed, logged in with a TEST user (the identity/email is typed in step 1)
+  - Developer options ON (Settings → About → tap Build number 7 times) → USB debugging ON
+  - Screen unlocked while tests run
+Prerequisites (computer):
+  - Chrome or Edge. Close Android Studio / scrcpy (they hold the phone).
+  - For Wi-Fi: Node.js + Android platform-tools (adb) installed.
+
+Step 1  Passcode + test identity → "Check test user" (finds the profile & Android device).
+Step 2  Connect the phone — two ways, both fully automatic afterwards:
+        A) USB cable      : "Connect phone" → pick the phone → tap "Allow" on the phone.
+        B) Wi-Fi (helper) : paste ONE command in a terminal (page shows it, with Copy):
+           Windows (PowerShell):
+             irm <SITE>/ct-device-bridge.mjs -OutFile ct-device-bridge.mjs; node ct-device-bridge.mjs --origin <SITE>
+           Mac / Linux (Terminal):
+             curl -fsSL -o ct-device-bridge.mjs <SITE>/ct-device-bridge.mjs && node ct-device-bridge.mjs --origin <SITE>
+           (<SITE> = e.g. http://localhost:3000 or the Vercel URL)
+           The page finds the helper by itself (no token to paste). For Wi-Fi: phone →
+           Wireless debugging → "Pair device with pairing code" → type IP, port and 6-digit
+           code → "Pair & connect". We connect automatically after pairing.
+           Keep the terminal window open while testing.
+Step 3  Push tests — press "Test" on each state, one by one (user watches the phone):
+          Foreground ~10 s : we open the app, send a push, look for it
+          Background ~12 s : we open the app, press Home, send a push
+          Killed  ~15–25 s : we close the app like swiping it away (not force-stop), send a push
+        Max wait 60 s each. The page shows each step live.
+Step 4  Guided log checks (starts by itself after connecting; reads CleverTap's own logs):
+          a. App start            automatic (restart, App Launched, data sent)
+          b. Log in again         user logs in → onUserLogin + identity fields checked
+          c. Reopen while logged in  "Restart the app for me" → onUserLogin on start (app update case)
+          d. Your key actions     user uses the app → events + property types appear live
+          e. Tap a push with a link  enter link → Send → tap it on the phone → we see where it opened
+                                  (do once with myapp://screen, once with https://...)
+          f. See an in-app        create a test in-app on the dashboard (trigger: App Launched),
+                                  press "Restart the app" → we see it displayed (or the error)
+          Pushes card             fills itself: received / shown / channel / impressions
+Also automatic on connect: device model/OS, app installed + version, notification permission,
+channels on the phone, deep links open, battery/background restrictions, phone log settings.
+
+Phone-brand handling (automatic):
+  - vivo/Oppo/realme/Xiaomi hiding debug logs (log.tag) → lifted for the session, restored after
+  - "Logger buffer: Off" / tiny buffers → lifted/enlarged, restored after
+  - Huawei/Honor (INFO-only logs) → shows the dialer-code fix (*#*#2846579#*#* → AP log)
+  - Xiaomi blocks simulated taps → we open/background the app without simulated taps
+  - Battery / Autostart restrictions → a missed background/killed push is shown as
+    "phone restricts the app" (Warning) with brand-specific steps, not as a code failure
+
+
+8. WHAT THE STATUSES MEAN
+-------------------------
+FAIL    Broken, or a CleverTap requirement is missing — users are affected. Fix in code/config.
+WARNING Works, but outdated or risky — or the problem is in account data / phone settings,
+        not this build (e.g. old profiles, events sent by another app sharing the project).
+MANUAL  Can't be decided automatically yet — run the step shown, or check the dashboard.
+N/A     Doesn't apply to this app (e.g. splash exclusion in a single-activity Flutter app).
+Each item's dropdown shows: Expected, What we found, Details, How to check (Automatic/Manual),
+Android limits (CleverTap docs) with a link, and the Suggested fix.
+
+
+9. ALL CHECKLIST ITEMS — HOW EACH IS CHECKED / WHAT THE CUSTOMER DOES
+-----------------------------------------------------------------------
+Legend:  [AUTO] decided without the user   [STEP n] ticks itself after that live step
+         [MANUAL] user confirms
+
+TIER 1 — CORE
+- App Installed event ................ [AUTO] API. None in 30 days = Manual (normal if no new
+                                       installs) → install fresh on a test phone to confirm.
+- App Launched event ................. [AUTO] API / live logs.
+- Latest SDK version ................. [AUTO] scan (or exact version from logs, STEP 4).
+                                       Fail only if below Android minimum: 4.3.0 for targetSdk 31+,
+                                       4.7.0 for targetSdk 33+. Just behind latest = Warning.
+- Account ID, Token & Region ......... [AUTO] manifest + live (wrong account/region = Fail).
+- Activity lifecycle callback ........ [AUTO] scan / live log "Activity Lifecycle Callback…".
+- FCM hand-off to CleverTap .......... [AUTO] scan; proven by any delivered test push (STEP 3).
+- Notification channel ............... [AUTO] scan + phone channels + channel used by pushes.
+                                       Customer: add the same channel ID on the dashboard
+                                       (Settings → Channels → Mobile Push → Android).
+- Identity / Email / Phone ........... [AUTO] API sample, test user, or live (STEP 4b).
+- onUserLogin on Login/Signup ........ [AUTO] scan + live (STEP 4b).
+- onUserLogin on app update .......... [STEP 4c] "Restart the app for me" while logged in.
+- Custom events ...................... [AUTO] API / test user / live (STEP 4d).
+- Device token ....................... [AUTO] API / test user / live.
+
+TIER 2 — PROFILE & LOCATION
+- GDPR location (network info) ....... [AUTO] scan: enableDeviceNetworkInfoReporting(true).
+- Lat & long ......................... [AUTO] scan (setLocation / Geofence SDK) or live header.
+- Anonymous profile before login ..... [AUTO] API profile sample.
+- Phone number format (E.164 +91…) ... [AUTO] API sample / test user / live login.
+                                       If the build sends valid numbers but old profiles don't
+                                       → Warning (data cleanup, no code change).
+
+TIER 3 — PUSH, IN-APP, DEEP LINKS
+- Test push received ................. [STEP 3] any state delivered.
+- Killed / Background / Foreground ... [STEP 3] press Test on each.
+- Push impressions ................... [AUTO] API campaign stats or live "Notification Viewed".
+- Deep link — internal ............... [STEP 4e] myapp://… link, tap it → opened inside app?
+                                       Scan also flags a missing Android 12+ onNewIntent hook.
+- Deep link — external URL ........... [STEP 4e] https://… link, tap it → opens browser/app.
+- Send test in-app ................... [STEP 4f] customer creates 1 test in-app on the dashboard
+                                       (in-apps can't be sent by API — they need an app event).
+                                       Also passes if in-app campaigns have views in 30 days.
+- In-app splash exclude .............. [AUTO] manifest CLEVERTAP_INAPP_EXCLUDE / splash activity.
+                                       Single-activity apps → N/A (use suspendInAppNotifications).
+- Android 13+ notification permission  [AUTO] scan (declared + runtime request) / phone (granted).
+- Uninstall tracking ................. [MANUAL] dashboard → Settings → Uninstall Tracking ON.
+                                       Ticks itself once an App Uninstalled event arrives.
+                                       Warning if Firebase Analytics missing (real-time tracking).
+- Session analytics .................. [MANUAL] dashboard setting — no API exists for it.
+
+TIER 4 — DATA QUALITY
+- Properties in correct format ....... [AUTO] API + live: numbers sent as text, dates as text.
+- Only valid values (no null/"") ..... [AUTO] API + live. Issues only on events this build
+                                       doesn't send → Warning "not from this build".
+- Business-critical events ........... [AUTO] uses the events listed in the audit (editable on
+                                       the report). Checks they arrive + property types.
+                                       Added later? press "Re-run API checks" or fire them in STEP 4.
+
+
+10. WHAT THE CUSTOMER MUST DO BY HAND (FULL LIST)
+-------------------------------------------------
+Always:
+  - Uninstall tracking ON in the dashboard → tick Verified
+  - Session analytics ON in the dashboard → tick Verified
+Only if they don't do live device testing (otherwise automatic):
+  - Push in killed / background / foreground state, test push received
+  - Deep link internal + external
+  - onUserLogin on app update
+  - Test in-app (create the campaign + watch it show)
+Dashboard setup that helps checks pass:
+  - Same notification channel ID added on the dashboard
+  - One test in-app campaign for the test user (trigger App Launched)
+  - Business-critical events listed in the audit (exact names, case-sensitive)
+Data cleanup (no code change):
+  - Old profiles with bad phone numbers (fix via Upload API or delete test profiles)
+  - Null/empty properties coming from another source sharing the project
+
+
+11. ANDROID LIMITS TO KNOW (from CleverTap docs) — explain these in the demo
+-----------------------------------------------------------------------------
+- Android 12+: CleverTap can't record "Notification Clicked" when the push link opens another
+  app (browser). The link still opens. Tool detects the tap from the notification shade instead.
+- Android 12+: a push tapped while the app is open arrives in onNewIntent() → the app must call
+  pushNotificationClickedEvent(intent.extras) there (needs SDK 4.3.0+).
+- Android 13+: targetSdk 33 apps must ask for notification permission at runtime (SDK 4.7.0+);
+  the user usually gets one chance — a push primer can ask again.
+- Android 8+: pushes only show on a channel; sound/importance come from the channel.
+- Force-stopped apps never get FCM. Some brands treat swiping away like force-stop unless
+  Autostart / battery is unrestricted. Doze can delay normal-priority pushes.
+- In-app header/footer and App Inbox need a FragmentActivity host (Flutter: FlutterFragmentActivity).
+- Uninstall tracking: silent push misses stale FCM tokens (270 days); real-time tracking needs
+  Firebase Analytics + a Cloud Function.
+- Minified (R8) builds hide some code → those items show "Manual / can't verify" and are
+  settled by the API or the live phone, never failed just for being unreadable.
+- Flutter DEBUG builds have no compiled Dart code → scan the RELEASE build for full coverage.
+- CleverTap API: in-apps can't be triggered by API; session analytics isn't exposed by API.
+
+
+12. DEMO SCRIPT (10 minutes)
+----------------------------
+1. Login with Google (show: staff sees all audits, customers only theirs).
+2. New audit → upload the release APK → point out "scanned in your browser, file not stored".
+3. Report: score, Must fix vs Should check, open one item → evidence, Android limits, fix.
+4. Live device: connect over USB (or Wi-Fi helper — one pasted command).
+5. Press Test on Background → phone goes Home → push appears → item turns green.
+6. Log session: "Restart the app for me" → onUserLogin on start ticks; send a novamart://cart
+   push, tap it → "Opened Cart".
+7. Show "Still to confirm by hand" — only dashboard toggles left.
+8. Talk security: passcode not stored, APK not uploaded, phone settings restored.
+
+
+13. TROUBLESHOOTING (quick answers)
+-----------------------------------
+- Helper "Cannot find module" → run the command from the folder where the file was downloaded
+  (the one-line command downloads + runs in the current folder).
+- Helper download saved HTML / "Unexpected token <" → old site version; fixed (file is public now).
+- "Phone is being used by another ADB program" → close Android Studio / scrcpy, run adb kill-server.
+- No CleverTap logs → build has debug level off (page shows the exact line to add).
+- Phone hides logs (vivo/Oppo/Huawei) → handled automatically; Huawei shows a dialer-code fix.
+- Push test "Not delivered" in killed state on Xiaomi/vivo/Oppo → enable Autostart + battery
+  "No restrictions" (page shows brand steps).
+- Tap test waiting → tap the notification itself (not just open the app); waits up to 3 minutes.
+- Wi-Fi Pair button disabled → helper not running yet, or code isn't 6 digits.
+- Wireless debugging drops when the phone sleeps / changes Wi-Fi → pair & connect again.
+- Region shows "eu1-spiky" in logs → normal: it's eu1's push-impression server.
+
+
+14. SETUP / DEPLOY (for whoever hosts it)
+-----------------------------------------
+Env vars (.env.local locally, Vercel project settings in production):
+  NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, SUPABASE_SECRET_KEY,
+  CRON_SECRET, STAFF_EMAIL_DOMAINS (e.g. clevertap.com)
+Supabase: tables audits / audit_results / audit_activity (migrations already applied);
+  Auth → enable Google + email magic link; add the site URL to redirect URLs.
+Vercel: deploy the repo; cron /api/cron/cleanup runs daily at 03:00.
+Local: npm install → npm run dev → http://localhost:3000
+Dev scripts: scripts/scan-apk.ts (scan an APK from terminal), scripts/engine-check.ts (re-run
+  rules on a stored audit), scripts/device-oem-check.ts (phone checks over adb),
+  scripts/device-sim.ts (simulated phone).

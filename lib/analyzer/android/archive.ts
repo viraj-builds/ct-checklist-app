@@ -15,6 +15,23 @@ export interface LoadedArchive {
 
 const MAX_TEXT_ASSET = 40 * 1024 * 1024;
 
+// Decompression-bomb guard: limits on what we're willing to inflate. Checked
+// against the sizes declared in the zip directory *before* decompressing.
+const MAX_ENTRY = 400 * 1024 * 1024;
+const MAX_TOTAL = 1536 * 1024 * 1024;
+const MAX_ENTRIES = 200_000;
+
+class Budget {
+  total = 0;
+  entries = 0;
+  take(name: string, size: number) {
+    if (++this.entries > MAX_ENTRIES) throw new Error("Archive has too many entries.");
+    if (size > MAX_ENTRY) throw new Error(`"${name}" is too large to analyse safely.`);
+    this.total += size;
+    if (this.total > MAX_TOTAL) throw new Error("Archive expands to more than 1.5 GB — refusing to unpack it.");
+  }
+}
+
 // Which entries to decompress (paths are normalised to APK layout).
 function wanted(path: string, size: number): boolean {
   if (path === "AndroidManifest.xml" || path === "manifest/AndroidManifest.xml") return true;
@@ -56,25 +73,37 @@ export function loadArchive(data: Uint8Array, fileName: string): LoadedArchive {
   const names: string[] = [];
   unzipSync(data, {
     filter: (f: UnzipFileInfo) => {
+      if (names.length >= MAX_ENTRIES) throw new Error("Archive has too many entries.");
       names.push(f.name);
       return false;
     },
   });
+  const budget = new Budget();
   const kind = detectKind(names, fileName);
 
-  if (kind === "apks" || kind === "xapk") return loadSplitBundle(data, names, kind);
+  if (kind === "apks" || kind === "xapk") return loadSplitBundle(data, kind, budget);
 
   const files = new Map<string, Uint8Array>();
   const raw = unzipSync(data, {
-    filter: (f) => wanted(normalise(f.name, kind), f.originalSize),
+    filter: (f) => {
+      const ok = wanted(normalise(f.name, kind), f.originalSize);
+      if (ok) budget.take(f.name, f.originalSize);
+      return ok;
+    },
   });
   for (const [name, bytes] of Object.entries(raw)) files.set(normalise(name, kind), bytes);
 
   return finish(kind, names.map((n) => normalise(n, kind)), files);
 }
 
-function loadSplitBundle(data: Uint8Array, outerNames: string[], kind: ArchiveKind): LoadedArchive {
-  const apks = unzipSync(data, { filter: (f) => f.name.endsWith(".apk") });
+function loadSplitBundle(data: Uint8Array, kind: ArchiveKind, budget: Budget): LoadedArchive {
+  const apks = unzipSync(data, {
+    filter: (f) => {
+      if (!f.name.endsWith(".apk")) return false;
+      budget.take(f.name, f.originalSize);
+      return true;
+    },
+  });
   // base.apk first so its manifest wins
   const order = Object.keys(apks).sort((a, b) => score(b) - score(a));
   const files = new Map<string, Uint8Array>();
@@ -82,13 +111,15 @@ function loadSplitBundle(data: Uint8Array, outerNames: string[], kind: ArchiveKi
   for (const name of order) {
     const inner = unzipSync(apks[name], {
       filter: (f) => {
+        if (names.length >= MAX_ENTRIES) throw new Error("Archive has too many entries.");
         names.push(f.name);
-        return wanted(f.name, f.originalSize) && !files.has(f.name);
+        const ok = wanted(f.name, f.originalSize) && !files.has(f.name);
+        if (ok) budget.take(f.name, f.originalSize);
+        return ok;
       },
     });
     for (const [n, b] of Object.entries(inner)) if (!files.has(n)) files.set(n, b);
   }
-  void outerNames;
   return finish(kind, names, files);
 
   function score(n: string) {

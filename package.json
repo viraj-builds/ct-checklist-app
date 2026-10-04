@@ -9,9 +9,14 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",
+    "@yume-chan/adb": "^2.6.4",
+    "@yume-chan/adb-credential-web": "^2.1.0",
+    "@yume-chan/adb-daemon-webusb": "^2.3.2",
+    "@yume-chan/stream-extra": "^2.6.1",
     "fflate": "^0.8.3",
-    "next": "16.3.5",
+    "next": "^16.3.8",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "server-only": "^0.0.1",
@@ -23,7 +28,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.5",
+    "eslint-config-next": "^16.3.8",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5"

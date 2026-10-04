@@ -4,14 +4,15 @@ import { getLatestVersions } from "./sdk-versions";
 import { evaluateAndroid } from "../engine/android";
 import type { AndroidScanReport } from "../analyzer/types";
 import type { ApiFindings } from "../clevertap/types";
+import type { DeviceFindings } from "../device/types";
 import type { Audit, AuditSource, AuditStatus, ItemResult, ItemStatus, Platform } from "../types";
+import { HttpError } from "./http";
+import type { SessionUser } from "./auth";
 
 // ---------------------------------------------------------------------------
 // Audit persistence. Results are always derived by the rule engine from the
 // stored scan + API findings; only manual ticks are stored as overrides.
 // ---------------------------------------------------------------------------
-
-export const AUDIT_ID = /^aud_[a-f0-9]{32}$/;
 
 export interface AuditInputs {
   criticalEvents?: string[];
@@ -38,9 +39,12 @@ interface AuditRow {
   inputs: AuditInputs;
   scan: AndroidScanReport | null;
   api: ApiFindings | null;
+  device: DeviceFindings | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  owner_id: string | null;
+  owner_email: string | null;
   audit_results?: ResultRow[];
 }
 
@@ -58,7 +62,7 @@ interface ResultRow {
 }
 
 const LIST_COLUMNS =
-  "id,name,platform,mode,source,region,account_id,target,status,stage,error,submitted_by,file_name,file_size,inputs,created_at,updated_at,completed_at,audit_results(item_id,status)";
+  "id,name,platform,mode,source,region,account_id,target,status,stage,error,submitted_by,owner_email,file_name,file_size,inputs,created_at,updated_at,completed_at,audit_results(item_id,status)";
 
 function toAudit(row: AuditRow, full: boolean): Audit {
   const results: Record<string, ItemResult> = {};
@@ -87,12 +91,12 @@ function toAudit(row: AuditRow, full: boolean): Audit {
     status: row.status,
     stage: row.stage ?? undefined,
     error: row.error ?? undefined,
-    submittedBy: row.submitted_by ?? "—",
+    submittedBy: row.owner_email ?? row.submitted_by ?? "—",
     fileName: row.file_name ?? undefined,
     fileSize: row.file_size ?? undefined,
     criticalEvents: row.inputs?.criticalEvents ?? [],
     results,
-    ...(full ? { scan: row.scan ?? undefined, api: row.api ?? undefined } : {}),
+    ...(full ? { scan: row.scan ?? undefined, api: row.api ?? undefined, device: row.device ?? undefined } : {}),
   };
 }
 
@@ -102,12 +106,11 @@ function fail(e: { message: string } | null, what: string): never {
 
 /* ------------------------------------------------------------------ */
 
-export async function listAudits(limit = 100): Promise<Audit[]> {
-  const { data, error } = await db()
-    .from("audits")
-    .select(LIST_COLUMNS)
-    .order("created_at", { ascending: false })
-    .limit(limit);
+/** Staff see every audit; everyone else only the audits they created. */
+export async function listAudits(user: SessionUser, limit = 100): Promise<Audit[]> {
+  let q = db().from("audits").select(LIST_COLUMNS).order("created_at", { ascending: false }).limit(limit);
+  if (!user.isStaff) q = q.eq("owner_id", user.id);
+  const { data, error } = await q;
   if (error) fail(error, "list audits");
   return (data as unknown as AuditRow[]).map((r) => toAudit(r, false));
 }
@@ -118,9 +121,36 @@ async function getRow(id: string): Promise<AuditRow | null> {
   return data as AuditRow | null;
 }
 
-export async function getAudit(id: string): Promise<Audit | null> {
+const canAccess = (row: Pick<AuditRow, "owner_id">, user: SessionUser) => user.isStaff || row.owner_id === user.id;
+
+/**
+ * Load an audit the user is allowed to see. Anything else is reported as
+ * "not found" so audit IDs can't be probed.
+ */
+export async function getAuditFor(id: string, user: SessionUser): Promise<Audit> {
   const row = await getRow(id);
-  return row ? toAudit(row, true) : null;
+  if (!row || !canAccess(row, user)) throw new HttpError(404, "Audit not found");
+  return toAudit(row, true);
+}
+
+/** Throws 404 unless the user may act on this audit. */
+export async function assertAccess(id: string, user: SessionUser) {
+  const { data, error } = await db().from("audits").select("owner_id").eq("id", id).maybeSingle();
+  if (error) fail(error, "check access");
+  if (!data || !canAccess(data as Pick<AuditRow, "owner_id">, user)) throw new HttpError(404, "Audit not found");
+}
+
+/** Abuse guard: max audits a non-staff user can create per hour. */
+export async function assertCreateQuota(user: SessionUser, perHour = 20) {
+  if (user.isStaff) return;
+  const since = new Date(Date.now() - 3600_000).toISOString();
+  const { count, error } = await db()
+    .from("audits")
+    .select("id", { count: "exact", head: true })
+    .eq("owner_id", user.id)
+    .gte("created_at", since);
+  if (error) fail(error, "check quota");
+  if ((count ?? 0) >= perHour) throw new HttpError(429, "Too many audits in the last hour — please wait a bit.");
 }
 
 export async function createAudit(input: {
@@ -131,7 +161,7 @@ export async function createAudit(input: {
   accountId?: string;
   fileName?: string;
   fileSize?: number;
-  submittedBy?: string;
+  owner: SessionUser;
   inputs: AuditInputs;
 }): Promise<{ id: string; storagePath?: string }> {
   const { data, error } = await db()
@@ -146,7 +176,9 @@ export async function createAudit(input: {
       target: input.fileName ?? null,
       file_name: input.fileName ?? null,
       file_size: input.fileSize ?? null,
-      submitted_by: input.submittedBy ?? null,
+      submitted_by: input.owner.email,
+      owner_id: input.owner.id,
+      owner_email: input.owner.email,
       status: "draft",
       stage: input.source === "upload" ? "Waiting for upload" : "Waiting for scan",
       inputs: input.inputs,
@@ -162,7 +194,7 @@ export async function createAudit(input: {
   return { id, storagePath };
 }
 
-export async function updateAudit(id: string, patch: Partial<Pick<AuditRow, "status" | "stage" | "error" | "scan" | "api" | "file_sha256" | "storage_path" | "completed_at">>) {
+export async function updateAudit(id: string, patch: Partial<Pick<AuditRow, "status" | "stage" | "error" | "scan" | "api" | "device" | "file_sha256" | "storage_path" | "completed_at">>) {
   const { error } = await db().from("audits").update(patch).eq("id", id);
   if (error) fail(error, "update audit");
 }
@@ -174,8 +206,40 @@ export async function deleteAudit(id: string) {
   if (error) fail(error, "delete audit");
 }
 
+/**
+ * Abuse guard for endpoints that call CleverTap with a user-supplied passcode
+ * (verify, test push): stops the tool being used to guess passcodes.
+ */
+export async function assertActionQuota(user: SessionUser, auditIdValue: string, action: string, perHour: number) {
+  const since = new Date(Date.now() - 3600_000).toISOString();
+  const { count, error } = await db()
+    .from("audit_activity")
+    .select("id", { count: "exact", head: true })
+    .eq("actor", user.email)
+    .eq("action", action)
+    .gte("created_at", since);
+  if (error) fail(error, "check quota");
+  if ((count ?? 0) >= perHour) throw new HttpError(429, "Too many attempts in the last hour — please wait a bit.");
+  await db().from("audit_activity").insert({ audit_id: auditIdValue, actor: user.email, action });
+}
+
+/** Replace the audit's business-critical events and re-derive results. */
+export async function setCriticalEvents(id: string, events: string[]) {
+  const row = await getRow(id);
+  if (!row) throw new HttpError(404, "Audit not found");
+  const { error } = await db()
+    .from("audits")
+    .update({ inputs: { ...(row.inputs ?? {}), criticalEvents: events } })
+    .eq("id", id);
+  if (error) fail(error, "save critical events");
+  await recompute(id);
+}
+
 /** Save a static scan report and re-derive results. */
 export async function saveScan(id: string, scan: AndroidScanReport) {
+  // The token ships inside every app build, but there's no reason to keep it.
+  const md = scan.manifest?.metaData;
+  if (md?.CLEVERTAP_TOKEN) md.CLEVERTAP_TOKEN = md.CLEVERTAP_TOKEN.slice(0, 3) + "•••";
   const row = await getRow(id);
   if (!row) throw new Error("Audit not found");
   const expectApi = !!row.inputs?.expectApi && !row.api;
@@ -211,6 +275,7 @@ export async function recompute(id: string) {
   const results = evaluateAndroid({
     scan: row.scan,
     api: row.api,
+    device: row.device,
     latest,
     accountId: row.account_id,
     region: row.region,

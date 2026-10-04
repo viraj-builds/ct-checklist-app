@@ -46,7 +46,9 @@ const RES_XML_END_ELEMENT = 0x0103;
 const RES_XML_RESOURCE_MAP = 0x0180;
 
 function readStringPool(r: Reader, start: number): string[] {
-  const count = r.u32(start + 8);
+  const chunkSize = r.u32(start + 4);
+  // each string needs a 4-byte offset entry, so count can't exceed size/4
+  const count = Math.min(r.u32(start + 8), Math.floor(chunkSize / 4), 500_000);
   const flags = r.u32(start + 16);
   const stringsStart = r.u32(start + 20);
   const isUtf8 = (flags & (1 << 8)) !== 0;
@@ -136,6 +138,7 @@ export function parseAxml(buf: Uint8Array): XmlEl | null {
         if (!name) continue;
         el.attrs[name] = raw !== 0xffffffff ? (strings[raw] ?? "") : typedValue(strings, dataType, data);
       }
+      if (stack.length > 256) throw new Error("Manifest nesting is too deep.");
       stack[stack.length - 1].children.push(el);
       stack.push(el);
     } else if (type === RES_XML_END_ELEMENT) {
@@ -236,12 +239,19 @@ function pbElement(buf: Uint8Array): XmlEl {
   return el;
 }
 
+let pbDepth = 0;
 function pbNode(buf: Uint8Array): XmlEl | null {
-  for (const f of pbFields(buf)) if (f.no === 1 && f.bytes) return pbElement(f.bytes);
+  if (++pbDepth > 256) throw new Error("Manifest nesting is too deep.");
+  try {
+    for (const f of pbFields(buf)) if (f.no === 1 && f.bytes) return pbElement(f.bytes);
+  } finally {
+    pbDepth--;
+  }
   return null; // text node
 }
 
 export function parseProtoXml(buf: Uint8Array): XmlEl | null {
+  pbDepth = 0;
   try {
     return pbNode(buf);
   } catch {

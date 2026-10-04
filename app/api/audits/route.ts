@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { createAudit, createUploadUrl, listAudits } from "@/lib/server/audits";
+import { assertCreateQuota, createAudit, createUploadUrl, listAudits } from "@/lib/server/audits";
 import { body, handle, HttpError, zAccountId, zRegion } from "@/lib/server/http";
 
-export const GET = handle(async () => {
-  return Response.json({ audits: await listAudits() });
+export const GET = handle(async (_req, _ctx, user) => {
+  return Response.json({ audits: await listAudits(user) });
 });
 
 const MAX_UPLOAD = 500 * 1024 * 1024;
@@ -23,14 +23,14 @@ const CreateAudit = z.object({
   fileSize: z.number().int().positive().max(MAX_UPLOAD, "File is larger than 500 MB"),
   withApi: z.boolean().default(true),
   criticalEvents: z.array(z.string().trim().min(1).max(120)).max(10).default([]),
-  submittedBy: z.string().trim().max(120).optional(),
 });
 
 // Create an audit. For "upload" audits this also returns a one-time signed
 // upload token so the browser sends the file straight to storage (Vercel
 // functions cap request bodies at 4.5 MB).
-export const POST = handle(async (req: Request) => {
+export const POST = handle(async (req, _ctx, user) => {
   const input = await body(req, CreateAudit);
+  await assertCreateQuota(user);
   if (input.platform !== "android") throw new HttpError(400, "Only Android audits are available right now.");
 
   const { id, storagePath } = await createAudit({
@@ -41,7 +41,7 @@ export const POST = handle(async (req: Request) => {
     accountId: input.accountId,
     fileName: input.fileName,
     fileSize: input.fileSize,
-    submittedBy: input.submittedBy,
+    owner: user,
     inputs: { criticalEvents: input.criticalEvents, expectApi: input.withApi },
   });
   const upload = storagePath ? await createUploadUrl(storagePath) : undefined;

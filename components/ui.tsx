@@ -10,13 +10,16 @@ export function Card({
   children,
   className,
   hover,
+  id,
 }: {
   children: ReactNode;
   className?: string;
   hover?: boolean;
+  id?: string;
 }) {
   return (
     <div
+      id={id}
       className={cx(
         "rounded-[var(--radius)] border bg-surface shadow-[var(--shadow-sm)]",
         hover && "transition hover:shadow-[var(--shadow-md)] hover:-translate-y-0.5",

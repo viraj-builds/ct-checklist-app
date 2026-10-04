@@ -27,7 +27,7 @@ export type AuditStatus = "draft" | "scanning" | "verifying" | "completed" | "fa
 export type AuditSource = "browser" | "upload" | "url";
 
 // Which engine produced a result.
-export type ResultSource = "static" | "api" | "static+api" | "manual" | "none";
+export type ResultSource = "static" | "api" | "static+api" | "device" | "manual" | "none";
 
 export interface ChecklistItem {
   id: string;
@@ -79,6 +79,7 @@ export interface Audit {
   results: Record<string, ItemResult>; // itemId -> result
   scan?: import("./analyzer/types").AndroidScanReport;
   api?: import("./clevertap/types").ApiFindings;
+  device?: import("./device/types").DeviceFindings;
 }
 
 export interface FaqEntry {

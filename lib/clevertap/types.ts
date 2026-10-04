@@ -47,11 +47,44 @@ export interface ApiFindings {
   events: Record<string, EventSample>; // keyed by event name
   profiles?: ProfileSample;
   customEvents: string[]; // names that were checked as custom events
-  testPush?: TestPushRecord;
+  messages?: Partial<Record<"push" | "inapp", ChannelStats>>; // Get Message Reports, last 30 days
+  realtime?: { count: number; android: number; checkedAt: number };
+  testUser?: TestUserRecord;
+  testPush?: TestPushRecord; // most recent
+  pushTests?: Partial<Record<"foreground" | "background" | "killed", TestPushRecord>>;
+}
+
+export interface ChannelStats {
+  campaigns: number;
+  sent: number;
+  viewed: number;
+  clicked: number;
+  sentNeverViewed: string[]; // campaign names with sent > 0 but 0 views
+  error?: string;
+}
+
+/** A single test user's profile (Get Profile by identity) — the "live session". */
+export interface TestUserRecord {
+  identity: string; // masked
+  found: boolean;
+  checkedAt: number;
+  android?: {
+    objectId?: string;
+    appVersion?: string;
+    osVersion?: string;
+    model?: string;
+    hasPushToken: boolean;
+  };
+  hasEmail: boolean;
+  hasPhone: boolean;
+  phoneValid?: boolean;
+  lastLaunchedAt?: number; // epoch ms
+  events: Record<string, { count?: number; lastSeen?: number }>; // epoch ms
 }
 
 export interface TestPushRecord {
   identity: string; // masked
+  appState?: "foreground" | "background" | "killed"; // what the user said the app was doing
   sentAt: number;
   channelId?: string;
   deepLink?: string;

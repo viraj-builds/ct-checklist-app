@@ -36,6 +36,7 @@ export const DEX_TARGETS: (DexTarget & { key: ApiKey })[] = [
   // static CleverTapInstanceConfig.createInstance(Context, accountId, token[, region])
   { key: "changeCredentials", cls: INSTANCE_CONFIG, names: ["createInstance"], strArgs: [1, 3] },
   { key: "setDebugLevel", cls: API, names: ["setDebugLevel"] },
+  { key: "pushClickedEvent", cls: API, names: ["pushNotificationClickedEvent"] },
 ];
 
 // Callers under these prefixes are SDK / framework internals — a call from
@@ -116,7 +117,34 @@ export const CROSS_PLATFORM_APIS: Record<ApiKey, string[]> = {
   getInstance: [],
   changeCredentials: [],
   setDebugLevel: ["setDebugLevel"],
+  pushClickedEvent: [], // must be called from the native activity, even in Flutter / RN
 };
+
+// Activity base classes and whether they are a FragmentActivity (CleverTap
+// renders in-app header/footer banners and App Inbox as fragments).
+export const ACTIVITY_HOSTS: Record<string, boolean> = {
+  "Landroidx/fragment/app/FragmentActivity;": true,
+  "Landroidx/appcompat/app/AppCompatActivity;": true,
+  "Landroid/support/v4/app/FragmentActivity;": true,
+  "Landroid/support/v7/app/AppCompatActivity;": true,
+  "Lio/flutter/embedding/android/FlutterFragmentActivity;": true,
+  "Lcom/facebook/react/ReactActivity;": true,
+  "Lorg/apache/cordova/CordovaActivity;": true,
+  "Lio/flutter/embedding/android/FlutterActivity;": false,
+  "Lio/flutter/app/FlutterActivity;": false,
+  "Landroidx/activity/ComponentActivity;": false,
+  "Landroidx/core/app/ComponentActivity;": false,
+  "Landroid/app/Activity;": false,
+  "Lcom/unity3d/player/UnityPlayerActivity;": false,
+  "Lcom/unity3d/player/UnityPlayerGameActivity;": false,
+};
+
+// Other Flutter ways to ask for notification permission at runtime. Dart AOT
+// drops uncalled code, so a surviving method-channel name means it's called.
+export const FLUTTER_PERMISSION_SIGNALS = [
+  { marker: "Messaging#requestPermission", label: "FirebaseMessaging.requestPermission() is called" },
+  { marker: "package:permission_handler/", label: "permission_handler plugin (Permission.notification.request)" },
+];
 
 // Manifest components that the SDK merges in — their presence proves the SDK
 // is linked even when the code is fully obfuscated.

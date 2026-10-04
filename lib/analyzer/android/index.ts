@@ -5,10 +5,12 @@ import { findAll, type XmlEl } from "./xml";
 import { containsAscii, decodeUtf8, indexOfAll, readAsciiRun } from "./bytes";
 import {
   CROSS_PLATFORM_APIS,
+  ACTIVITY_HOSTS,
   CT_APPLICATION_CLASSES,
   CT_COMPONENT_PREFIX,
   CT_FCM_SERVICES,
   CT_MODULES,
+  FLUTTER_PERMISSION_SIGNALS,
   DEX_TARGETS,
   LIBRARY_PREFIXES,
   META_KEYS_OF_INTEREST,
@@ -54,18 +56,26 @@ export async function analyzeAndroid(
     staticStrings: {},
     methodRefs: new Set(),
     ctSubclasses: {},
+    supers: {},
   };
   const markers = new Map<string, string>(); // artifact -> version
   for (let i = 0; i < ar.dex.length; i++) {
     onProgress(`Scanning bytecode (${i + 1}/${ar.dex.length})`, 20 + Math.round((i / Math.max(1, ar.dex.length)) * 55));
-    const res = scanDex(ar.dex[i], DEX_TARGETS, {
-      skipCallerPrefixes: [...SDK_INTERNAL_PREFIXES, ...LIBRARY_PREFIXES],
-      staticClasses,
-    });
+    let res: DexScanResult;
+    try {
+      res = scanDex(ar.dex[i], DEX_TARGETS, {
+        skipCallerPrefixes: [...SDK_INTERNAL_PREFIXES, ...LIBRARY_PREFIXES],
+        staticClasses,
+      });
+    } catch {
+      notes.push(`classes${i ? i + 1 : ""}.dex is malformed and was skipped.`);
+      continue;
+    }
     res.classes.forEach((c) => merged.classes.add(c));
     res.methodRefs.forEach((m) => merged.methodRefs.add(m));
     Object.assign(merged.staticStrings, res.staticStrings);
     Object.assign(merged.ctSubclasses, res.ctSubclasses);
+    Object.assign(merged.supers, res.supers);
     for (const [k, v] of Object.entries(res.calls)) (merged.calls[k] ??= []).push(...v);
     for (const [a, v] of readVersionMarkers(ar.dex[i])) markers.set(a, v);
     await yieldToEventLoop();
@@ -142,7 +152,15 @@ export async function analyzeAndroid(
       ar.names.some((n) => /firebase-messaging/.test(n)),
     googleServicesConfigured: !!arsc && (containsAscii(arsc, "gcm_defaultSenderId") || containsAscii(arsc, "google_app_id")),
     installReferrer: hasPrefix("Lcom/android/installreferrer/"),
+    analyticsSdk:
+      merged.classes.has("Lcom/google/firebase/analytics/FirebaseAnalytics;") ||
+      ar.names.some((n) => /firebase-analytics|play-services-measurement/.test(n)),
   };
+  let launcherHost = activityHost(mf.launcherActivity, merged.supers);
+  // Minified Flutter builds rename the embedding classes, but FlutterFragmentActivity's
+  // fragment tag survives (R8 drops it when only FlutterActivity is used).
+  if ((launcherHost?.fragment ?? null) === null && obfuscated && fw.primary === "flutter" && ar.dex.some((d) => containsAscii(d, "flutter_fragment")))
+    launcherHost = { chain: ["io.flutter.embedding.android.FlutterFragmentActivity (minified)"], fragment: true };
 
   onProgress("Done", 100);
   return {
@@ -162,6 +180,7 @@ export async function analyzeAndroid(
       applicationClass: mf.applicationClass,
       debuggable: mf.debuggable,
       launcherActivity: mf.launcherActivity,
+      launcherHost,
       activityCount: mf.activities.length,
       dexCount: ar.dex.length,
       abis: uniq(ar.names.map((n) => n.match(/^lib\/([^/]+)\//)?.[1]).filter(Boolean) as string[]),
@@ -394,6 +413,11 @@ function scanCrossPlatformLayer(ar: LoadedArchive, primary: Framework, hermes: b
         }
       }
     }
+    // Android 13 notification permission requested through other Flutter plugins
+    if (!found.promptPushPermission) {
+      const hit = FLUTTER_PERMISSION_SIGNALS.find((s) => containsAscii(so, s.marker));
+      if (hit) found.promptPushPermission = { evidence: `Dart: ${hit.label}`, strings: [], confidence: "medium" };
+    }
     return { layer: "dart", inspectable: true, found };
   }
 
@@ -502,6 +526,21 @@ function buildApiUsage(
     out[key] = u;
   }
   return out;
+}
+
+// Walk the launcher activity's superclasses until a known base class.
+function activityHost(launcher: string | undefined, supers: Record<string, string>) {
+  if (!launcher) return undefined;
+  const chain: string[] = [];
+  let cls = "L" + launcher.replace(/\./g, "/") + ";";
+  for (let i = 0; i < 8; i++) {
+    const sup = supers[cls];
+    if (!sup) break;
+    chain.push(dotted(sup));
+    if (sup in ACTIVITY_HOSTS) return { chain, fragment: ACTIVITY_HOSTS[sup] };
+    cls = sup;
+  }
+  return chain.length ? { chain, fragment: null } : undefined;
 }
 
 function markFound(u: ApiUsage, layer: CodeLayer, evidence: string, confidence: ApiUsage["confidence"]) {

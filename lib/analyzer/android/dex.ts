@@ -29,6 +29,7 @@ export interface DexScanResult {
   staticStrings: Record<string, Record<string, string>>; // class -> field -> value
   methodRefs: Set<string>; // "Lcls;->name" for target classes referenced at all
   ctSubclasses: Record<string, string>; // app class -> CleverTap superclass (e.g. extends sdk.Application)
+  supers: Record<string, string>; // class -> superclass, for activity-like classes only (capped)
 }
 
 // Instruction length (in 16-bit code units) per opcode.
@@ -70,7 +71,9 @@ export function scanDex(
     staticStrings: {},
     methodRefs: new Set(),
     ctSubclasses: {},
+    supers: {},
   };
+  let supersCount = 0;
   if (buf.length < 0x70 || decodeUtf8(buf.subarray(0, 3)) !== "dex") return result;
 
   const stringIdsSize = r.u32(56);
@@ -137,6 +140,10 @@ export function scanDex(
     if (superIdx !== 0xffffffff && !cls.startsWith("Lcom/clevertap/")) {
       const sup = typeName(superIdx);
       if (sup.startsWith("Lcom/clevertap/")) result.ctSubclasses[cls] = sup;
+      if (supersCount < 4000 && /Activity;$/.test(sup)) {
+        result.supers[cls] = sup;
+        supersCount++;
+      }
     }
 
     const classDataOff = r.u32(def + 24);

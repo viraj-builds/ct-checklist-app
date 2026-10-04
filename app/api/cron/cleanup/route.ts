@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { db, UPLOAD_BUCKET } from "@/lib/server/supabase";
 
 // Safety net for the "upload" mode: uploads are deleted right after analysis,
@@ -9,7 +10,9 @@ const MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
 
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
-  if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`)
+  const given = Buffer.from(req.headers.get("authorization") ?? "");
+  const expected = Buffer.from(`Bearer ${secret}`);
+  if (!secret || given.length !== expected.length || !timingSafeEqual(given, expected))
     return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const cutoff = new Date(Date.now() - MAX_AGE_MS).toISOString();

@@ -37,7 +37,9 @@ export default function NewAuditPage() {
   const [skipApi, setSkipApi] = useState(false);
   const [showPass, setShowPass] = useState(false);
   const [file, setFile] = useState<File | null>(null);
-  const [where, setWhere] = useState<ScanWhere>("browser");
+  // Builds are scanned in the browser. Server upload ("upload") still works in
+  // the backend and can be re-enabled here if a slow-device option is needed.
+  const where: ScanWhere = "browser";
   const [events, setEvents] = useState("");
   const [run, setRun] = useState<RunState | null>(null);
 
@@ -182,6 +184,9 @@ export default function NewAuditPage() {
                   <div className="relative">
                     <input
                       type={showPass ? "text" : "password"}
+                      autoComplete="new-password"
+                      data-1p-ignore
+                      data-lpignore="true"
                       value={passcode}
                       disabled={skipApi}
                       onChange={(e) => setPasscode(e.target.value)}
@@ -208,27 +213,17 @@ export default function NewAuditPage() {
             {/* Source */}
             <Field label={`Upload ${PLATFORM_META[platform].targetLabel}`}>
               <Dropzone accept={PLATFORM_META[platform].accept} file={file} onFile={setFile} hint=".apk · .aab · .apks · .xapk" />
+              <span className="mt-1.5 flex items-center gap-1.5 text-xs text-muted">
+                <Icon name="lock" size={12} className="text-[var(--pass)]" />
+                Checked right here in your browser — your app file isn&apos;t stored anywhere.
+              </span>
+              {platform === "android" && (
+                <span className="mt-1 block text-xs text-muted">
+                  Upload the normal build you ship (release). No special build needed. For the live phone tests later, install a build with
+                  CleverTap debug logs on.
+                </span>
+              )}
             </Field>
-
-            <div>
-              <span className="mb-1.5 block text-sm font-medium">Where should the build be scanned?</span>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <ScanOption
-                  selected={where === "browser"}
-                  onClick={() => setWhere("browser")}
-                  icon="lock"
-                  title="Private scan (recommended)"
-                  desc="Runs in this browser. The file never leaves your device — only the findings are saved."
-                />
-                <ScanOption
-                  selected={where === "upload"}
-                  onClick={() => setWhere("upload")}
-                  icon="upload"
-                  title="Upload & scan on server"
-                  desc="For slow devices. The file is deleted right after analysis."
-                />
-              </div>
-            </div>
 
             <Field label="Business-critical events (optional)">
               <input
@@ -238,7 +233,8 @@ export default function NewAuditPage() {
                 className="input"
               />
               <span className="mt-1 block text-xs text-muted">
-                Comma-separated, up to 10. These are checked for data flow and property formats (Tier 4).
+                The 3–4 events that matter most to your business, spelled exactly as on the dashboard. We check they arrive and that
+                their properties have the right types. You can add or change them later on the report.
               </span>
             </Field>
 
@@ -260,7 +256,6 @@ export default function NewAuditPage() {
               <ReviewRow label="Account ID" value={accountId.trim()} mono />
               <ReviewRow label="API checks" value={skipApi ? "Skipped (no passcode)" : "Enabled"} />
               <ReviewRow label="Build" value={file ? `${file.name} · ${formatBytes(file.size)}` : ""} mono />
-              <ReviewRow label="Scan" value={where === "browser" ? "Private — in this browser" : "Upload to server"} />
               {criticalEvents.length > 0 && <ReviewRow label="Critical events" value={criticalEvents.join(", ")} />}
               <ReviewRow label="Checklist items" value={String(itemCount)} />
             </div>
@@ -313,7 +308,7 @@ export default function NewAuditPage() {
 function runSteps(where: ScanWhere, withApi: boolean): string[] {
   return [
     "Creating audit",
-    ...(where === "browser" ? ["Scanning the build in your browser"] : ["Uploading the build", "Analysing on the server"]),
+    ...(where === "browser" ? ["Checking the build"] : ["Uploading the build", "Analysing on the server"]),
     ...(withApi ? ["Verifying with the CleverTap API"] : []),
     "Building report",
   ];
@@ -396,37 +391,6 @@ function ChoiceCard({
         <div className="font-semibold">{title}</div>
         <div className="text-xs text-muted">{desc}</div>
       </div>
-    </button>
-  );
-}
-
-function ScanOption({
-  selected,
-  onClick,
-  icon,
-  title,
-  desc,
-}: {
-  selected: boolean;
-  onClick: () => void;
-  icon: IconName;
-  title: string;
-  desc: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cx(
-        "flex items-start gap-3 rounded-xl border p-3.5 text-left transition",
-        selected ? "border-brand bg-brand-soft ring-1 ring-brand" : "hover:bg-surface-2",
-      )}
-    >
-      <Icon name={icon} size={18} className={cx("mt-0.5 shrink-0", selected ? "text-brand" : "text-muted")} />
-      <span>
-        <span className="block text-sm font-semibold">{title}</span>
-        <span className="mt-0.5 block text-xs leading-relaxed text-muted">{desc}</span>
-      </span>
     </button>
   );
 }

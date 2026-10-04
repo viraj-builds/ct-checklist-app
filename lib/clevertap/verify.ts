@@ -1,12 +1,15 @@
 import "server-only";
 import {
   CtApiError,
+  getMessageReports,
+  getProfile,
+  getRealtime,
   sampleEvents,
   sampleProfiles,
   type CtCredentials,
   type EventRecord,
 } from "./client";
-import type { ApiFindings, EventSample, ProfileSample, PropStats } from "./types";
+import type { ApiFindings, ChannelStats, EventSample, ProfileSample, PropStats, TestUserRecord } from "./types";
 
 // ---------------------------------------------------------------------------
 // CleverTap API verifier for app (Android) audits. Calls run sequentially — the
@@ -19,6 +22,7 @@ const SYSTEM_EVENTS = {
   installed: "App Installed",
   viewed: "Notification Viewed",
   clicked: "Notification Clicked",
+  uninstalled: "App Uninstalled", // only recorded when uninstall tracking is on
 } as const;
 
 export interface VerifyOptions {
@@ -54,6 +58,7 @@ export async function verifyAppAccount(creds: CtCredentials, opts: VerifyOptions
     [SYSTEM_EVENTS.installed, 30],
     [SYSTEM_EVENTS.viewed, 30],
     [SYSTEM_EVENTS.clicked, 30],
+    [SYSTEM_EVENTS.uninstalled, 30],
   ] as const) {
     findings.events[name] = await safeSample(creds, name, days, 50, opts.platform, false);
   }
@@ -76,7 +81,7 @@ export async function verifyAppAccount(creds: CtCredentials, opts: VerifyOptions
       if (!infos.length) continue;
       sampled++;
       if (infos.some((i) => !!i.push_token)) withToken++;
-      for (const i of infos) if (i.app_version) versions[i.app_version] = (versions[i.app_version] ?? 0) + 1;
+      for (const i of infos) if (i.app_version && !(i.app_version in Object.prototype)) versions[i.app_version] = (versions[i.app_version] ?? 0) + 1;
     }
     if (findings.profiles) {
       findings.profiles.withPushToken = withToken;
@@ -87,8 +92,74 @@ export async function verifyAppAccount(creds: CtCredentials, opts: VerifyOptions
     /* optional — token check falls back to static analysis */
   }
 
+  // 5. Campaign delivery stats (push impressions, in-app renders, clicks).
+  findings.messages = {};
+  try {
+    const reports = await getMessageReports(creds, 30, ["push", "inapp"]);
+    for (const ch of ["push", "inapp"] as const) {
+      const rows = reports.filter(
+        (r) => r.channel.toLowerCase().replace(/[^a-z]/g, "") === ch && (r.devices.length === 0 || r.devices.includes(opts.platform)),
+      );
+      const st: ChannelStats = { campaigns: rows.length, sent: 0, viewed: 0, clicked: 0, sentNeverViewed: [] };
+      for (const r of rows) {
+        st.sent += r.sent;
+        st.viewed += r.viewed;
+        st.clicked += r.clicked;
+        if (r.sent > 0 && r.viewed === 0 && st.sentNeverViewed.length < 5) st.sentNeverViewed.push(r.name);
+      }
+      findings.messages[ch] = st;
+    }
+  } catch (e) {
+    findings.messages.push = { campaigns: 0, sent: 0, viewed: 0, clicked: 0, sentNeverViewed: [], error: (e as Error).message };
+  }
+
+  // 6. Who's online right now.
+  try {
+    const rt = await getRealtime(creds);
+    findings.realtime = { count: rt.count, android: rt.os[opts.platform] ?? 0, checkedAt: Date.now() };
+  } catch {
+    /* optional */
+  }
+
   findings.durationMs = Date.now() - t0;
   return findings;
+}
+
+/** Look up one test user's profile — used for the live-device session. */
+export async function checkTestUser(creds: CtCredentials, identity: string, platform: "Android" | "iOS"): Promise<TestUserRecord> {
+  const rec = await getProfile(creds, identity);
+  const base: TestUserRecord = {
+    identity: mask(identity),
+    found: !!rec,
+    checkedAt: Date.now(),
+    hasEmail: false,
+    hasPhone: false,
+    events: Object.create(null),
+  };
+  if (!rec) return base;
+  const info = (rec.platformInfo ?? []).filter((i) => i.platform === platform);
+  const dev = info.find((i) => i.push_token) ?? info[0];
+  const pd = (rec.profileData ?? {}) as Record<string, unknown>;
+  const phone = clean(pd.Phone ?? pd.phone);
+  for (const [name, e] of Object.entries(rec.events ?? {})) {
+    if (Object.keys(base.events).length >= 200) break;
+    base.events[name] = { count: e.count, lastSeen: e.last_seen ? e.last_seen * 1000 : undefined };
+  }
+  const extra = dev as { os_version?: string; model?: string } | undefined;
+  return {
+    ...base,
+    android: dev && {
+      objectId: dev.objectId,
+      appVersion: dev.app_version,
+      osVersion: extra?.os_version,
+      model: extra?.model,
+      hasPushToken: !!dev.push_token,
+    },
+    hasEmail: !!clean(rec.email),
+    hasPhone: !!phone,
+    phoneValid: phone ? E164.test(phone) : undefined,
+    lastLaunchedAt: base.events["App Launched"]?.lastSeen,
+  };
 }
 
 async function safeSample(
@@ -133,9 +204,10 @@ function summarizeEvents(
     lastSeen: ts.length ? String(Math.max(...ts)) : undefined,
   };
   if (withProps) {
-    const props: Record<string, PropStats> = {};
+    const props: Record<string, PropStats> = Object.create(null);
     for (const r of onPlatform.length ? onPlatform : recs) {
       for (const [k, v] of Object.entries(r.event_props ?? {})) {
+        if (Object.keys(props).length >= 100 && !(k in props)) continue; // cap property fan-out
         const st = (props[k] ??= { types: {}, examples: [], numericStrings: 0, dateLikeStrings: 0 });
         const t = valueType(v);
         st.types[t] = (st.types[t] ?? 0) + 1;

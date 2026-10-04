@@ -1,14 +1,15 @@
 import { analyzeAndroid } from "@/lib/analyzer/android";
 import { db } from "@/lib/server/supabase";
-import { downloadUpload, removeUpload, saveScan, updateAudit } from "@/lib/server/audits";
+import { assertAccess, downloadUpload, removeUpload, saveScan, updateAudit } from "@/lib/server/audits";
 import { auditId, handle, HttpError } from "@/lib/server/http";
 
 // Server scan: the browser has uploaded the binary to private storage; analyse
 // it here and delete it straight afterwards.
 export const maxDuration = 300;
 
-export const POST = handle(async (_req: Request, ctx: RouteContext<"/api/audits/[id]/analyze">) => {
+export const POST = handle(async (_req, ctx: RouteContext<"/api/audits/[id]/analyze">, user) => {
   const id = auditId((await ctx.params).id);
+  await assertAccess(id, user);
   const { data: row } = await db()
     .from("audits")
     .select("source,storage_path,file_name,status")

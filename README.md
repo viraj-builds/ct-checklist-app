@@ -41,3 +41,18 @@ Report page: tick items (PATCH …/items/:itemId), test push + confirm
 | Persistence | `lib/server` | Supabase repository; results are re-derived on each change, and manual ticks are kept as overrides. |
 
 Signatures (class names, method names, version markers) live in `lib/analyzer/android/signatures.ts`. Update them there when the SDK changes.
+
+## Live-device testing (report page → "Live device testing")
+
+| Mode | Needs | What's automated |
+| --- | --- | --- |
+| USB in the browser | Chrome/Edge on a computer, USB debugging on | App state (foreground/background/killed) set via ADB, push sent, delivery read from the notification shade; channels, permission, installed version, CleverTap logs, deep links |
+| Wi-Fi or USB via helper | Node 18+, Android platform-tools, `node ct-device-bridge.mjs` (download from the page) | Same as USB; Wi-Fi uses Android 11+ Wireless debugging (pair + connect from the page) |
+| No cable | Test identity only | You set the app state; we send the push and confirm via the test user's "Notification Viewed" in CleverTap |
+
+Dev checks:
+
+```bash
+npx tsx scripts/device-sim.ts                                   # device logic against a simulated phone
+CT_ACCOUNT_ID=... CT_REGION=eu1 CT_PASSCODE=... npx tsx --conditions=react-server scripts/ct-api-check.ts [identity] [events...]
+```

@@ -225,7 +225,7 @@ export default function NewAuditPage() {
               )}
             </Field>
 
-            <Field label="Business-critical events (optional)">
+            <Field label="Custom events to verify (optional)">
               <input
                 value={events}
                 onChange={(e) => setEvents(e.target.value)}
@@ -233,8 +233,8 @@ export default function NewAuditPage() {
                 className="input"
               />
               <span className="mt-1 block text-xs text-muted">
-                The 3–4 events that matter most to your business, spelled exactly as on the dashboard. We check they arrive and that
-                their properties have the right types. You can add or change them later on the report.
+                The 3–4 custom events that matter most in your app, spelled exactly as in code. We check they fire with the right
+                property types. You can add or change them later on the report.
               </span>
             </Field>
 
@@ -256,7 +256,7 @@ export default function NewAuditPage() {
               <ReviewRow label="Account ID" value={accountId.trim()} mono />
               <ReviewRow label="API checks" value={skipApi ? "Skipped (no passcode)" : "Enabled"} />
               <ReviewRow label="Build" value={file ? `${file.name} · ${formatBytes(file.size)}` : ""} mono />
-              {criticalEvents.length > 0 && <ReviewRow label="Critical events" value={criticalEvents.join(", ")} />}
+              {criticalEvents.length > 0 && <ReviewRow label="Custom events" value={criticalEvents.join(", ")} />}
               <ReviewRow label="Checklist items" value={String(itemCount)} />
             </div>
             <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-dashed p-3.5 text-xs leading-relaxed text-muted">

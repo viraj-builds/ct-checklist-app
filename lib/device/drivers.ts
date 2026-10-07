@@ -107,12 +107,15 @@ async function helper<T>(token: string, path: string, body?: unknown): Promise<T
   return json as T;
 }
 
+export const HELPER_MIN_VERSION = 3; // must match HELPER_VERSION in public/ct-device-bridge.mjs
+
 /** Ask a running helper for its token (only answered for the audit site's own origin). */
-export async function helperHello(): Promise<string | null> {
+export async function helperHello(): Promise<{ token: string; version: number } | null> {
   try {
     const res = await fetch(HELPER_URL + "/v1/hello", { cache: "no-store" });
     if (!res.ok) return null;
-    return ((await res.json()) as { token?: string }).token ?? null;
+    const j = (await res.json()) as { token?: string; version?: number };
+    return j.token ? { token: j.token, version: j.version ?? 1 } : null;
   } catch {
     return null;
   }

@@ -125,9 +125,9 @@ export const LIVE_GUIDE: Record<
   android: {
     verbose: "CleverTapAPI.setDebugLevel(CleverTapAPI.LogLevel.VERBOSE);",
     steps: [
-      "In “Live device testing” above, run the push tests (step 3) and the guided log checks (step 4) — most items tick themselves.",
-      "The guided log checks need CleverTap's verbose logging in the build (line below). Phones that hide logs (vivo, Oppo…) are handled automatically.",
-      "For anything left, check it on the phone and press Verified or Not working.",
+      "In “Live device testing” above, run the push tests (step 3) and the guided checks (step 4) — most items tick themselves.",
+      "Install a test build with CleverTap debug mode on (line below) so we can confirm each action.",
+      "For anything left, check it yourself and press Verified or Not working.",
     ],
     helpVideo:
       "https://www.youtube.com/results?search_query=how+to+enable+usb+debugging+android",
@@ -190,7 +190,7 @@ export const HOW_TO_CHECK: Record<string, { auto: boolean; how: string }> = {
   "app-t1-sdk-version": { auto: true, how: "Step 4 reads the exact SDK version from the SDK's own logs, even when the build is minified." },
   "app-t4-critical-events": {
     auto: true,
-    how: "Use the app for each listed event during step 4 (or press “Re-run API checks” at the top) — we read the event and its property types.",
+    how: "Live device testing → step 4 “Your key actions”: do the actions that raise each listed event — we check it fires with the right property types.",
   },
   "app-t3-uninstall": { auto: false, how: "Dashboard → Settings → Engage → Uninstall tracking ON. Ticks itself once an App Uninstalled event arrives." },
   "app-t3-session-analytics": { auto: false, how: "Dashboard → Settings → Session analytics ON. CleverTap has no API for this, so tick it after checking." },

@@ -30,6 +30,7 @@ const flag = (name, def) => {
 const PORT = Number(flag("--port", "47811"));
 const ORIGINS = new Set(["http://localhost:3000", ...flag("--origin", "").split(",").filter(Boolean)].map((o) => o.replace(/\/$/, "")));
 const TOKEN = randomBytes(12).toString("hex");
+const HELPER_VERSION = 3; // bump when the command list changes (lib/device/drivers.ts HELPER_MIN_VERSION)
 
 function findAdb() {
   const exe = process.platform === "win32" ? "adb.exe" : "adb";
@@ -111,6 +112,9 @@ function buildCommand(op) {
     case "bgState": return `echo "bucket=$(am get-standby-bucket ${pkg(op.pkg)} 2>/dev/null)"; cmd appops get ${pkg(op.pkg)} RUN_ANY_IN_BACKGROUND 2>/dev/null; cmd appops get ${pkg(op.pkg)} 10008 2>/dev/null; dumpsys deviceidle whitelist 2>/dev/null | grep -qF ",${pkg(op.pkg)}," && echo whitelisted=1; true`;
     case "screen": return "{ dumpsys power | grep -E 'mWakefulness='; dumpsys activity activities | grep -E 'mKeyguardShowing='; dumpsys window | grep -E 'mShowingLockscreen=|mDreamingLockscreen=|isKeyguardShowing='; } 2>/dev/null || true";
     case "wake": return "input keyevent 224 2>/dev/null || true";
+    case "setTagLevel":
+      if (typeof op.tag !== "string" || !/^[A-Za-z0-9_.:-]{1,60}$/.test(op.tag)) throw new Error("Invalid log tag.");
+      return `setprop 'log.tag.${op.tag}' '${level(op.level)}'`;
     case "findLog": return `logcat -d -v brief | grep -F '${marker(op.marker)}' | tail -n 5 || true`;
     default: throw new Error("Unknown operation.");
   }
@@ -172,7 +176,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (!allowed) return send(res, 403, { error: `Origin not allowed. Restart with --origin ${origin ?? "<site>"}` });
   // The audit page asks for the token itself, so nobody has to copy it.
-  if (req.method === "GET" && req.url === "/v1/hello") return send(res, 200, { token: TOKEN, version: 2 }, allowed);
+  if (req.method === "GET" && req.url === "/v1/hello") return send(res, 200, { token: TOKEN, version: HELPER_VERSION }, allowed);
   if (!tokenOk(req.headers["x-bridge-token"])) return send(res, 401, { error: "Wrong helper token — copy it from the helper window." }, allowed);
 
   try {

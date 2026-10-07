@@ -223,7 +223,7 @@ export async function assertActionQuota(user: SessionUser, auditIdValue: string,
   await db().from("audit_activity").insert({ audit_id: auditIdValue, actor: user.email, action });
 }
 
-/** Replace the audit's business-critical events and re-derive results. */
+/** Replace the audit's custom events to verify and re-derive results. */
 export async function setCriticalEvents(id: string, events: string[]) {
   const row = await getRow(id);
   if (!row) throw new HttpError(404, "Audit not found");
@@ -280,6 +280,7 @@ export async function recompute(id: string) {
     accountId: row.account_id,
     region: row.region,
     criticalEvents: row.inputs?.criticalEvents ?? [],
+    since: row.created_at ? new Date(row.created_at).getTime() : undefined,
   });
   const overridden = new Set((row.audit_results ?? []).filter((r) => r.manual_override).map((r) => r.item_id));
   const rows = Object.values(results)

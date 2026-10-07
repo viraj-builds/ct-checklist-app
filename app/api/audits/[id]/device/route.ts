@@ -79,6 +79,7 @@ const Findings = z.object({
       queueFailed: z.number(),
       pushToken: z.boolean(),
       locationSent: z.boolean(),
+      networkInfo: z.boolean().optional(),
       onUserLogin: z.array(z.object({ kind: z.enum(["same-user", "switch-user", "anonymous", "aborted", "failed"]), line: z.number() })).max(20),
       profilePushes: z
         .array(z.object({ keys: z.array(short).max(60), hasIdentity: z.boolean(), phoneValid: z.boolean().optional(), nullish: z.array(short).max(60), line: z.number() }))

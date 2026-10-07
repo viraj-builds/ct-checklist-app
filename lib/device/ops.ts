@@ -65,6 +65,9 @@ export function buildCommand(op: DeviceOp): string {
       return "{ dumpsys power | grep -E 'mWakefulness='; dumpsys activity activities | grep -E 'mKeyguardShowing='; dumpsys window | grep -E 'mShowingLockscreen=|mDreamingLockscreen=|isKeyguardShowing='; } 2>/dev/null || true";
     case "wake":
       return "input keyevent 224 2>/dev/null || true";
+    case "setTagLevel":
+      if (!/^[A-Za-z0-9_.:-]{1,60}$/.test(op.tag) || !/^[A-Za-z]{0,10}$/.test(op.level)) throw new Error("Invalid log tag.");
+      return `setprop 'log.tag.${op.tag}' '${op.level}'`;
     case "findLog":
       if (!MARKER.test(op.marker)) throw new Error("Invalid marker.");
       return `logcat -d -v brief | grep -F '${op.marker}' | tail -n 5 || true`;

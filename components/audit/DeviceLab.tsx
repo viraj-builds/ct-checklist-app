@@ -10,6 +10,7 @@ import {
   helperDriver,
   helperPair,
   helperHello,
+  HELPER_MIN_VERSION,
   helperStatus,
   webUsbSupported,
   type DeviceDriver,
@@ -266,7 +267,7 @@ export function DeviceLab({ audit }: { audit: Audit }) {
         <details className="mt-2 text-xs text-muted">
           <summary className="cursor-pointer font-medium text-text">Before you start (2 minutes)</summary>
           <ol className="mt-1.5 list-decimal space-y-0.5 pl-5">
-            <li>Install the same build you scanned on an Android phone and log in with a test user.</li>
+            <li>Install a test build of the same app version (CleverTap debug mode on — your developer can switch it on) and log in with a test user.</li>
             <li>Phone: Settings → About → tap “Build number” 7×, then Developer options → USB debugging ON.</li>
             <li>Use Chrome or Edge on a computer. Close Android Studio (it holds the phone).</li>
             <li>Keep the phone unlocked with the screen on while tests run.</li>
@@ -397,7 +398,7 @@ export function DeviceLab({ audit }: { audit: Audit }) {
         </Section>
 
         {/* 4. guided log checks */}
-        <Section n={4} title="Guided checks from CleverTap logs">
+        <Section n={4} title="Guided checks">
           {driver && pkg ? (
             <LogSession
               driver={driver}
@@ -408,13 +409,14 @@ export function DeviceLab({ audit }: { audit: Audit }) {
                   : undefined
               }
               autoStart
+              accountId={audit.accountId ?? scan?.manifest.metaData.CLEVERTAP_ACCOUNT_ID}
               canSendPush={needCreds}
               sendPush={sendLinkPush}
               onSave={saveLogs}
             />
           ) : (
             <p className="text-xs text-muted">
-              Connect the phone (step 2) to check login, app restarts, live events and push links from the SDK&apos;s own logs.
+              Connect the phone (step 2), then do each action shown here — login, restart, your key actions, a push with a link, an in-app.
             </p>
           )}
         </Section>
@@ -506,6 +508,7 @@ function HelperConnect({ onDriver, onError }: { onDriver: (d: DeviceDriver) => v
     typeof navigator !== "undefined" && /Mac|Linux/i.test(navigator.platform) ? "mac" : "win",
   );
   const used = useRef(false);
+  const [outdated, setOutdated] = useState(false);
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const cmd =
     os === "win"
@@ -530,8 +533,11 @@ function HelperConnect({ onDriver, onError }: { onDriver: (d: DeviceDriver) => v
     const tick = async () => {
       let t = token;
       if (!t) {
-        t = (await helperHello()) ?? "";
-        if (!alive || !t) return;
+        const h = await helperHello();
+        if (!alive || !h) return;
+        setOutdated(h.version < HELPER_MIN_VERSION);
+        if (h.version < HELPER_MIN_VERSION) return; // old helper lacks commands — ask for the new one
+        t = h.token;
         setToken(t);
       }
       try {
@@ -569,6 +575,12 @@ function HelperConnect({ onDriver, onError }: { onDriver: (d: DeviceDriver) => v
 
   return (
     <div className="space-y-3 text-xs">
+      {outdated && (
+        <div className="rounded-xl px-3 py-2" style={{ background: "var(--warn-soft)" }}>
+          <b>Your helper is out of date.</b> Stop it (Ctrl+C in its terminal) and run the command below again — it downloads the new
+          version.
+        </div>
+      )}
       <div className="rounded-xl border p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="font-medium">
@@ -725,53 +737,14 @@ function DeviceSummary({ f }: { f: DeviceFindings }) {
   return (
     <div className="rounded-xl border bg-surface-2 p-4 text-xs">
       <div className="mb-2 font-semibold">
-        Last device check · {f.device.manufacturer} {f.device.model}
-        {f.device.rom ? ` (${f.device.rom})` : ""} · Android {f.device.android} · {f.transport === "wifi" ? "Wi-Fi" : "USB"} ·{" "}
-        {formatDate(f.checkedAt)}
+        Test phone · {f.device.manufacturer} {f.device.model} · Android {f.device.android} · {f.transport === "wifi" ? "Wi-Fi" : "USB"}
       </div>
       <ul className="space-y-1 text-muted">
         <li>
           App: {f.app.installed ? `installed, version ${f.app.versionName ?? "?"}` : "not installed"}
           {f.app.matchesScan === false && " — different from the scanned build"}
         </li>
-        <li>Notification permission: {f.notificationPermission ?? "unknown"}</li>
-        {f.logging && (
-          <li>
-            Phone logging:{" "}
-            {f.logging.status === "ok"
-              ? "all levels visible"
-              : f.logging.status === "lifted" || f.logging.status === "hidden"
-                ? `hidden by the phone${f.logging.logTag ? ` (log.tag=${f.logging.logTag})` : ""} — we lift it during the log session`
-                : `hidden (${f.logging.levelSeen === "none" ? "logging off" : `only ${f.logging.levelSeen} and above`})`}
-            {f.logging.bufferKb ? ` · buffer ${f.logging.bufferKb >= 1024 ? `${Math.round(f.logging.bufferKb / 1024)} MB` : `${f.logging.bufferKb} KB`}` : ""}
-          </li>
-        )}
-        {f.background && (
-          <li>
-            Background:{" "}
-            {f.background.restrictedBucket || f.background.backgroundRestricted
-              ? "restricted by Android"
-              : f.background.batteryUnrestricted
-                ? "unrestricted"
-                : "normal battery optimisation"}
-            {f.background.autoStart ? ` · autostart ${f.background.autoStart}` : ""}
-          </li>
-        )}
-        <li>Channels on device: {f.channels.length ? f.channels.map((c) => c.id).join(", ") : "none yet"}</li>
-        <li>
-          CleverTap logs:{" "}
-          {f.logs
-            ? `${f.logs.lines} lines read · SDK ${f.logs.sdkVersion ?? "?"} · ${f.logs.events.length} custom events`
-            : f.ctLogs.lines.length
-              ? `${f.ctLogs.lines.length} lines${f.ctLogs.verbose ? " (verbose on)" : ""}`
-              : "none yet — start the log session in step 4"}
-          {f.ctLogs.accountId && ` · account ${f.ctLogs.accountId}`}
-        </li>
-        {f.deepLinks.map((d) => (
-          <li key={d.url}>
-            Deep link {d.url}: {d.ok ? `opens ${d.activity}` : d.detail}
-          </li>
-        ))}
+        <li>Notifications allowed: {f.notificationPermission === "granted" || f.notificationPermission === "not-required" ? "yes" : f.notificationPermission === "denied" ? "no" : "unknown"}</li>
       </ul>
       {f.logging?.status === "blocked" && f.logging.fix && (
         <p className="mt-2" style={{ color: "var(--fail)" }}>
@@ -787,14 +760,6 @@ function DeviceSummary({ f }: { f: DeviceFindings }) {
             ))}
           </ul>
         </div>
-      )}
-      {f.ctLogs.errors.length > 0 && (
-        <details className="mt-2">
-          <summary className="cursor-pointer font-medium" style={{ color: "var(--fail)" }}>
-            {f.ctLogs.errors.length} CleverTap errors in the log
-          </summary>
-          <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[11px]">{f.ctLogs.errors.join("\n")}</pre>
-        </details>
       )}
     </div>
   );

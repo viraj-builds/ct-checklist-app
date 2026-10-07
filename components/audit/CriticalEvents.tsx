@@ -7,7 +7,7 @@ import type { Audit } from "@/lib/types";
 import { Card, Button } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 
-// Business-critical events: the few events the customer's business depends on.
+// Custom events to verify: the few custom events the customer cares about most.
 // Each one is checked two ways — the CleverTap API (did it arrive in the last
 // 30 days, with which property types) and the live log session (fired on the
 // phone just now, with which properties).
@@ -39,7 +39,7 @@ export function CriticalEvents({ audit }: { audit: Audit }) {
     setMsg("");
     try {
       await api(`/api/audits/${audit.id}`, { method: "PATCH", body: JSON.stringify({ criticalEvents: list }) });
-      setMsg(audit.api?.ok ? "Saved. Press “Re-run API checks” to fetch their data from CleverTap." : "Saved.");
+      setMsg("Saved. Trigger these events on the phone in Live device testing → step 4.");
     } catch (e) {
       setMsg((e as Error).message);
     } finally {
@@ -63,11 +63,11 @@ export function CriticalEvents({ audit }: { audit: Audit }) {
     <Card className="p-5">
       <div className="flex items-center gap-2">
         <Icon name="zap" size={17} className="text-brand" />
-        <h2 className="font-semibold">Business-critical events</h2>
+        <h2 className="font-semibold">Custom events to verify</h2>
       </div>
       <p className="mt-1 text-sm text-muted">
-        The 3–4 events your business depends on (e.g. <i>Charged</i>, <i>Added To Cart</i>). Each is checked in CleverTap (did it arrive in
-        the last 30 days?) and live on the phone (do its properties have the right types?). Names must match the dashboard exactly.
+        The 3–4 custom events that matter most in your app (e.g. <i>Product Viewed</i>, <i>Added To Cart</i>). Trigger them on the phone in
+        Live device testing → step 4 — we check each one fires with the right property types. Names must match exactly.
       </p>
 
       <div className="mt-3 flex flex-wrap gap-1.5">

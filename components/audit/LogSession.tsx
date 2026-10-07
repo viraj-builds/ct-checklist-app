@@ -4,9 +4,10 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { DeviceDriver } from "@/lib/device/drivers";
 import { mergeInsights, parseCtLog, type LogInsights } from "@/lib/device/ctlog";
 import type { LoggingState, LogScenarios } from "@/lib/device/types";
-import { detectOem, liftLogging, readyScreen } from "@/lib/device/oem";
+import { ctTags, detectOem, liftLogging, readyScreen } from "@/lib/device/oem";
 import { parseProps } from "@/lib/device/runner";
 import { Button } from "@/components/ui";
+import { cx } from "@/lib/format";
 import { Icon } from "@/components/Icon";
 
 // Guided checks driven by the CleverTap SDK's own verbose logs: the user does
@@ -35,6 +36,7 @@ export function LogSession({
   sendPush,
   onSave,
   autoStart,
+  accountId,
 }: {
   driver: DeviceDriver;
   pkg: string;
@@ -43,6 +45,7 @@ export function LogSession({
   sendPush: (deepLink: string, marker: string) => Promise<void>;
   onSave: (s: LogSessionSave) => Promise<void>;
   autoStart?: boolean; // start listening as soon as the phone is connected
+  accountId?: string; // CleverTap account — its log tag is pinned to verbose
 }) {
   const [active, setActive] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -160,6 +163,7 @@ export function LogSession({
         if (!(await driver.run({ t: "logProbe", marker })).includes(`V/CTAuditProbe`)) {
           if (origTag.current === null) origTag.current = (await driver.run({ t: "getLogTag" })).trim();
           await driver.run({ t: "setLogTag", level: "V" });
+          for (const tag of ctTags(accountId)) await driver.run({ t: "setTagLevel", tag, level: "V" }).catch(() => {});
           await driver.run({ t: "forceStop", pkg });
           await driver.run({ t: "launch", pkg });
           if (alive) setZeroCause("rehidden");
@@ -173,7 +177,7 @@ export function LogSession({
     return () => {
       alive = false;
     };
-  }, [noLines, zeroCause, driver, pkg]);
+  }, [noLines, zeroCause, driver, pkg, accountId]);
   // after a fix attempt, look again if still nothing arrives
   useEffect(() => {
     if (zeroCause !== "not-running" && zeroCause !== "rehidden") return;
@@ -209,7 +213,7 @@ export function LogSession({
       // only, and put everything back on Stop.
       await restoreRef.current?.();
       const oem = detectOem(parseProps(await driver.run({ t: "props" })));
-      const { state, restore } = await liftLogging(driver, oem);
+      const { state, restore } = await liftLogging(driver, oem, accountId);
       restoreRef.current = restore;
       setLogging(state);
       setRestricted(state.status === "lifted");
@@ -288,56 +292,52 @@ export function LogSession({
   const identified = ins?.profilePushes.filter((p) => p.hasIdentity) ?? [];
   const customEvents = ins?.events ?? [];
 
+  // one step at a time: the first unfinished step is highlighted
+  const okA = ins ? ins.appLaunchedFired && ins.queueSent > 0 : undefined;
+  const okB = logins.some((l) => l.kind !== "aborted" && l.kind !== "failed") || identified.length > 0 ? true : undefined;
+  const okC = sc.relaunch ? sc.relaunch.onUserLoginOnStart : undefined;
+  const okD = customEvents.length ? customEvents.every((e) => e.issues.length === 0) : undefined;
+  const okE = sc.linkTap ? sc.linkTap.clicked && !!sc.linkTap.landed : undefined;
+  const okF = ins?.inApp?.errors.length ? false : ins?.inApp?.shown ? true : undefined;
+  const cur = !active ? "" : (["a", "b", "c", "d", "e", "f"] as const).find((k) => ({ a: okA, b: okB, c: okC, d: okD, e: okE, f: okF })[k] !== true) ?? "";
+
   return (
     <div className="space-y-3">
       <p className="text-xs leading-relaxed text-muted">
-        Reads CleverTap&apos;s own logs from the phone while you use the app — needs{" "}
-        <code className="font-mono">CleverTapAPI.setDebugLevel(VERBOSE)</code> (or <code className="font-mono">setDebugLevel(3)</code> in
-        Flutter/RN) in the build. Nothing personal is saved: profile values are reduced to key names.
+        Do each action below on the phone — we confirm it automatically and tick the checklist. Nothing personal is saved.
       </p>
 
       {!active ? (
         <Button size="sm" icon="terminal" disabled={starting} onClick={start}>
-          {starting ? "Starting…" : ins ? "Start a new log session" : "Start log session (restarts the app)"}
+          {starting ? "Starting…" : ins ? "Start again" : "Start (restarts the app)"}
         </Button>
       ) : (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="flex items-center gap-1.5 font-medium" style={{ color: "var(--pass)" }}>
-            <span className="h-2 w-2 animate-pulse rounded-full" style={{ background: "var(--pass)" }} /> Listening to CleverTap logs
-            {ins ? ` · ${ins.lines} lines` : ""}
+            <span className="h-2 w-2 animate-pulse rounded-full" style={{ background: "var(--pass)" }} /> Checking automatically
           </span>
           <Button size="sm" variant="ghost" onClick={stop}>
             Stop
           </Button>
         </div>
       )}
-      {restricted && (
-        <p className="text-[11px] text-muted">
-          This phone hides debug logs{logging?.logTag ? <> (system setting <code className="font-mono">log.tag={logging.logTag}</code>)</> : null}.
-          We lifted it for this session and put it back when you press Stop.
-        </p>
-      )}
       {logging?.status === "blocked" && (
-        <Hint tone="fail" title="This phone is hiding the logs we need">
+        <Hint tone="fail" title="This phone needs one setting changed">
           {logging.fix}
         </Hint>
       )}
       {active && locked && <Hint title="Unlock the phone">Keep it unlocked with the screen on — in-apps and taps can&apos;t happen on the lock screen.</Hint>}
       {active && noLines && zeroCause === "not-running" && (
-        <Hint title="The app wasn't running">We opened it again on the phone. Keep it open — logs should appear in a few seconds.</Hint>
+        <Hint title="The app wasn't running">We opened it again on the phone. Keep it open for a few seconds.</Hint>
       )}
       {active && noLines && zeroCause === "rehidden" && (
-        <Hint title="The phone hid the logs again">
-          Some phones (vivo) switch debug logs off by themselves. We switched them back on and restarted the app — logs should appear in a few
-          seconds.
-        </Hint>
+        <Hint title="One moment">This phone changed a setting by itself — we fixed it and restarted the app.</Hint>
       )}
       {active && logging?.status !== "blocked" && noLines && zeroCause === "sdk-off" && (
-        <Hint tone="fail" title="The app isn't printing CleverTap logs">
-          The phone shows logs, but this build has CleverTap logging off. Add this before CleverTap starts, install that build, then press Start
-          again: Android <code className="font-mono">CleverTapAPI.setDebugLevel(CleverTapAPI.LogLevel.VERBOSE)</code> · Flutter{" "}
-          <code className="font-mono">CleverTapPlugin.setDebugLevel(3)</code> · React Native{" "}
-          <code className="font-mono">CleverTap.setDebugLevel(3)</code>.
+        <Hint tone="fail" title="Install a test build">
+          The app on this phone has CleverTap&apos;s debug mode off, so we can&apos;t confirm these steps. Ask your developer for a test build with{" "}
+          <code className="font-mono">setDebugLevel</code> on (Android <code className="font-mono">CleverTapAPI.LogLevel.VERBOSE</code>, Flutter /
+          React Native <code className="font-mono">3</code>), install it, then press Start again.
         </Hint>
       )}
       {err && <p className="text-xs" style={{ color: "var(--fail)" }}>{err}</p>}
@@ -346,44 +346,44 @@ export function LogSession({
         <div className="grid gap-2 md:grid-cols-2">
           <Step
             n="a"
+            current={cur === "a"}
             title="App start"
-            how="Automatic — we restarted the app."
-            ok={ins ? ins.appLaunchedFired && ins.queueSent > 0 : undefined}
+            how="Automatic — we open the app for you."
+            ok={okA}
             rows={
               ins
                 ? [
-                    ["SDK", ins.sdkVersion ? `v${ins.sdkVersion}${ins.wrapper ? ` · ${ins.wrapper.lib} plugin ${ins.wrapper.version ?? ""}` : ""}` : "—"],
-                    ["Account / region", `${ins.accountId ?? "—"} · ${ins.region ?? "—"}`],
-                    ["Lifecycle registered", yes(ins.lifecycleRegistered)],
-                    ["App Launched fired", yes(ins.appLaunchedFired)],
-                    ["Data sent to CleverTap", ins.queueSent ? `yes (${ins.queueSent}×)` : ins.queueFailed ? "FAILED" : "not yet"],
-                    ["Push token", yes(ins.pushToken)],
-                    ["Location sent", yes(ins.locationSent)],
+                    ["App opened (App Launched)", yes(ins.appLaunchedFired)],
+                    ["Data reaching CleverTap", ins.queueSent ? "yes" : ins.queueFailed ? "failed" : "not yet"],
+                    ["Ready for push", yes(ins.pushToken)],
+                    ["Location", yes(ins.locationSent)],
                   ]
                 : []
             }
           />
           <Step
             n="b"
+            current={cur === "b"}
             title="Log in"
             how="In the app: log out, then log in again with your test user."
-            ok={logins.some((l) => l.kind !== "aborted" && l.kind !== "failed") || identified.length > 0 ? true : undefined}
+            ok={okB}
             rows={[
-              ["onUserLogin calls", logins.length ? logins.map((l) => l.kind).join(", ") : "none yet"],
+              ["User identified", logins.some((l) => l.kind !== "aborted" && l.kind !== "failed") ? "yes" : logins.length ? "failed" : "not yet"],
               ...(identified.at(-1)
                 ? ([
-                    ["Profile keys sent", identified.at(-1)!.keys.join(", ")],
-                    ["Phone format", identified.at(-1)!.phoneValid === undefined ? "no phone" : identified.at(-1)!.phoneValid ? "valid (+country code)" : "INVALID"],
+                    ["Sent", ["Identity", "Email", "Phone", "Name"].filter((k) => identified.at(-1)!.keys.includes(k)).join(", ")],
+                    ["Phone format", identified.at(-1)!.phoneValid === undefined ? "no phone" : identified.at(-1)!.phoneValid ? "valid (+country code)" : "missing + / country code"],
                   ] as [string, string][])
                 : []),
             ]}
           />
           <Step
             n="c"
+            current={cur === "c"}
             title="Reopen while logged in (app update)"
-            how="Stay logged in. We restart the app and watch for onUserLogin on start."
-            ok={sc.relaunch ? sc.relaunch.onUserLoginOnStart : undefined}
-            rows={sc.relaunch ? [["Result", sc.relaunch.onUserLoginOnStart ? `called on start (${sc.relaunch.kinds.join(", ")})` : "NOT called on start"]] : []}
+            how="Stay logged in. We restart the app and check you're still identified (like after an app update)."
+            ok={okC}
+            rows={sc.relaunch ? [["Result", sc.relaunch.onUserLoginOnStart ? "identified on start ✓" : "not identified on start"]] : []}
             action={
               <Button size="sm" variant="secondary" icon="refresh" disabled={!active || !!waiting} onClick={relaunch}>
                 {waiting === "relaunch" ? "Watching (15 s)…" : "Restart the app for me"}
@@ -392,24 +392,18 @@ export function LogSession({
           />
           <Step
             n="d"
+            current={cur === "d"}
             title="Your key actions"
-            how="Use the app like a customer: open a product, add to cart, buy… Events appear here live."
-            ok={customEvents.length ? customEvents.every((e) => e.issues.length === 0) : undefined}
-            rows={customEvents.slice(0, 8).map((e) => [
-              `${e.name} ×${e.count}`,
-              e.issues.length
-                ? `⚠ ${e.issues.join("; ")}`
-                : Object.entries(e.props)
-                    .slice(0, 4)
-                    .map(([k, t]) => `${k}:${t.join("/")}`)
-                    .join(", ") || "no properties",
-            ])}
+            how="Use the app like a customer: open a product, add to cart, buy… Each action appears here."
+            ok={okD}
+            rows={customEvents.slice(0, 8).map((e) => [e.name, e.issues.length ? `⚠ ${e.issues[0]}` : "✓"])}
           />
           <Step
             n="e"
+            current={cur === "e"}
             title="Tap a push with a link"
             how="We send a push with this link. Tap it on the phone — we check where it opens."
-            ok={sc.linkTap ? sc.linkTap.clicked && !!sc.linkTap.landed : undefined}
+            ok={okE}
             rows={
               sc.linkTap
                 ? [
@@ -432,9 +426,10 @@ export function LogSession({
           />
           <Step
             n="f"
+            current={cur === "f"}
             title="See an in-app"
             how="On the CleverTap dashboard, create a test in-app for your test user (trigger: App Launched). Then press Restart."
-            ok={ins?.inApp?.errors.length ? false : ins?.inApp?.shown || ins?.inApp?.impressions ? true : undefined}
+            ok={okF}
             rows={[
               ["In-apps shown", String(ins?.inApp?.shown ?? 0)],
               ...((ins?.inApp?.errors ?? []).map((e) => ["Problem", e]) as [string, string][]),
@@ -450,24 +445,16 @@ export function LogSession({
             <Step
               n="✓"
               title="Pushes on this phone (automatic)"
-              how="Filled in from the SDK logs whenever a push arrives."
+              how="Filled in by itself whenever a push arrives."
               ok={ins.push.errors.length || ins.push.fallbackChannel ? false : ins.push.rendered > 0 ? true : undefined}
               rows={[
-                ["Received by the SDK", String(ins.push.received)],
+                ["Received", String(ins.push.received)],
                 ["Shown", String(ins.push.rendered)],
-                ["Channel", ins.push.fallbackChannel ? `fallback “${ins.push.fallbackChannel}” — app's channel missing` : ins.push.channels.join(", ") || "—"],
-                ["Impressions recorded", String(ins.push.impressions)],
+                ["Channel", ins.push.fallbackChannel ? "app's channel missing (default used)" : ins.push.channels.join(", ") || "—"],
+                ["Views recorded", String(ins.push.impressions)],
                 ...(ins.push.errors.map((e) => ["Problem", e]) as [string, string][]),
               ]}
             />
-          )}
-          {ins && ins.errors.length > 0 && (
-            <div className="rounded-xl border p-3 text-xs md:col-span-2">
-              <div className="mb-1 font-semibold" style={{ color: "var(--fail)" }}>
-                CleverTap errors in the log
-              </div>
-              <pre className="max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-muted">{ins.errors.join("\n")}</pre>
-            </div>
           )}
         </div>
       )}
@@ -484,20 +471,30 @@ function Step({
   ok,
   rows,
   action,
+  current,
 }: {
   n: string;
   title: string;
   how: string;
   ok?: boolean;
+  current?: boolean;
   rows: [string, string][];
   action?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border p-3">
+    <div
+      className={cx("rounded-xl border p-3 transition", current && "ring-2 ring-[var(--accent)]")}
+      style={current ? { background: "var(--accent-soft)" } : ok === true ? { opacity: 0.75 } : undefined}
+    >
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-semibold">
           <span className="mr-1.5 text-muted">{n}.</span>
           {title}
+          {current && (
+            <span className="ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase text-white" style={{ background: "var(--accent)" }}>
+              Do this now
+            </span>
+          )}
         </span>
         {ok === true ? (
           <Icon name="check" size={16} style={{ color: "var(--pass)" }} />

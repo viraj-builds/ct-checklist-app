@@ -30,7 +30,8 @@ export type DeviceOp =
   | { t: "bgState"; pkg: string } // standby bucket, background restriction, autostart, battery whitelist
   | { t: "screen" }
   | { t: "wake" }
-  | { t: "findLog"; marker: string };
+  | { t: "findLog"; marker: string }
+  | { t: "setTagLevel"; tag: string; level: string }; // log.tag.<TAG> — survives phones resetting log.tag
 
 export interface OemInfo {
   family: "xiaomi" | "vivo" | "oppo" | "huawei" | "samsung" | "other";

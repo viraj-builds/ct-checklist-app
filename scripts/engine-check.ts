@@ -6,11 +6,11 @@ import { evaluateAndroid } from "../lib/engine/android";
 const id = process.argv[2];
 const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY!, { auth: { persistSession: false } });
 (async () => {
-  const { data: a, error } = await db.from("audits").select("scan, api, device, account_id, region, inputs").eq("id", id).single();
+  const { data: a, error } = await db.from("audits").select("scan, api, device, account_id, region, inputs, created_at").eq("id", id).single();
   if (error || !a) throw new Error(error?.message ?? "not found");
   const out = evaluateAndroid({
     scan: a.scan, api: a.api, device: a.device, accountId: a.account_id, region: a.region,
-    criticalEvents: a.inputs?.criticalEvents, latest: { android: "8.4.1", flutter: "4.2.0" },
+    criticalEvents: a.inputs?.criticalEvents, since: new Date(a.created_at).getTime(), latest: { android: "8.4.1", flutter: "4.2.0" },
   });
   const rows = Object.values(out).sort((x, y) => x.status.localeCompare(y.status));
   for (const r of rows) console.log(r.status.padEnd(6), r.itemId.padEnd(28), r.detected);

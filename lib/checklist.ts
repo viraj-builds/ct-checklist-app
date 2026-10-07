@@ -351,9 +351,9 @@ export const CHECKLIST: ChecklistItem[] = [
     scope: "app",
     platforms: ["android", "ios"],
     tier: 4,
-    title: "Business-critical events & properties verified",
+    title: "Key custom events & properties verified",
     expected:
-      "3–4 critical events/properties from the event design sheet fire in the right format.",
+      "3–4 key custom events and their properties from the event design sheet fire in the right format.",
     method: "hybrid",
     docUrl: "https://docs.clevertap.com/docs/sample-events-by-business-verticals",
   },

@@ -38,6 +38,7 @@ export interface LogInsights {
   queueFailed: number;
   pushToken: boolean;
   locationSent: boolean;
+  networkInfo?: boolean; // carrier / network fields sent → enableDeviceNetworkInfoReporting(true)
   onUserLogin: { kind: "same-user" | "switch-user" | "anonymous" | "aborted" | "failed"; line: number }[];
   profilePushes: { keys: string[]; hasIdentity: boolean; phoneValid?: boolean; nullish: string[]; line: number }[];
   events: LoggedEvent[];
@@ -103,6 +104,7 @@ export function parseCtLog(text: string): LogInsights {
     queueFailed: 0,
     pushToken: false,
     locationSent: false,
+    networkInfo: false,
     onUserLogin: [],
     profilePushes: [],
     events: [],
@@ -111,6 +113,8 @@ export function parseCtLog(text: string): LogInsights {
     inApp: { shown: 0, blockedOnExcludedScreen: false, impressions: 0, errors: [] },
     errors: [],
   };
+  let rcvA = 0;
+  let rcvB = 0;
   const addErr = (list: string[], msg: string) => {
     if (list.length < 8 && !list.includes(msg)) list.push(msg);
   };
@@ -124,7 +128,9 @@ export function parseCtLog(text: string): LogInsights {
     if (/\[PushType:fcm\].*Token/i.test(l) || /FCM token/i.test(l)) out.pushToken = true;
 
     // push
-    if (l.includes("received notification from CleverTap")) out.push.received++;
+    // the same push can appear under two tags — count each source once, keep the larger
+    if (l.includes("received notification from CleverTap")) rcvA++;
+    if (/Handling notification: Bundle\[\{.*wzrk_/.test(l)) rcvB++;
     if (/Rendered Push Notification in|Rendered notification:/.test(l)) out.push.rendered++;
     const ch = l.match(/Rendering Push on channel = (\S+)/)?.[1];
     if (ch && !out.push.channels.includes(ch)) out.push.channels.push(ch);
@@ -136,7 +142,7 @@ export function parseCtLog(text: string): LogInsights {
     if (/Error getting or creating notification channel/.test(l)) addErr(out.push.errors, "The SDK couldn't create the notification channel.");
 
     // in-app
-    if (/Displaying (PIP )?In-App/.test(l)) out.inApp.shown++;
+    if (/Displaying (PIP )?In-App|Notification ready: \{"type":"(?!custom-key-value)/.test(l)) out.inApp.shown++;
     if (l.includes("Not showing notification on blacklisted activity")) out.inApp.blockedOnExcludedScreen = true;
     if (/Unable to display In-App: Activity\/Fragment is null/.test(l))
       addErr(out.inApp.errors, "In-app couldn't be shown: the host activity isn't a FragmentActivity (common on Flutter/React Native).");
@@ -160,6 +166,8 @@ export function parseCtLog(text: string): LogInsights {
       const pi = l.match(/"ct_pi":"([^"]*)"/)?.[1];
       if (pi) out.identityKeys = pi.split(",").filter(Boolean);
       if (/"Latitude":-?\d/.test(l) && /"Longitude":-?\d/.test(l)) out.locationSent = true;
+      // the SDK only adds carrier / radio / wifi to the header when network info reporting is on
+      if (/"af":\{[^}]*"(Carrier|Radio|wifi)":/.test(l)) out.networkInfo = true;
     }
 
     const login = l.match(/onUserLogin: (.*)$/)?.[1];
@@ -234,6 +242,7 @@ export function parseCtLog(text: string): LogInsights {
     }
   });
 
+  out.push.received = Math.max(rcvA, rcvB);
   out.events = [...events.values()].slice(0, 50);
   out.profilePushes = out.profilePushes.slice(-10);
   out.onUserLogin = out.onUserLogin.slice(-20);
@@ -278,6 +287,7 @@ export function mergeInsights(prev: LogInsights | undefined, next: LogInsights):
     queueFailed: next.queueFailed,
     pushToken: prev.pushToken || next.pushToken,
     locationSent: prev.locationSent || next.locationSent,
+    networkInfo: !!(prev.networkInfo || next.networkInfo),
     onUserLogin: uniq(prev.onUserLogin, next.onUserLogin, (x) => x.kind, 20),
     profilePushes: uniq(prev.profilePushes, next.profilePushes, (x) => x.keys.join(",") + x.hasIdentity + x.phoneValid, 10),
     events: [...events.values()].slice(0, 50),

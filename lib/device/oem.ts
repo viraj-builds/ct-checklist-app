@@ -76,9 +76,22 @@ export async function checkLogging(d: DeviceDriver, oem: OemInfo): Promise<Loggi
  * Make verbose logs visible for a log session, changing as little as possible,
  * and return a function that puts every setting back.
  */
-export async function liftLogging(d: DeviceDriver, oem: OemInfo): Promise<{ state: LoggingState; restore: () => Promise<void> }> {
+export async function liftLogging(
+  d: DeviceDriver,
+  oem: OemInfo,
+  accountId?: string,
+): Promise<{ state: LoggingState; restore: () => Promise<void> }> {
   const st = parseLogState(await d.run({ t: "logState" }));
   const undo: (() => Promise<unknown>)[] = [];
+  // Per-tag levels beat the phone-wide log.tag, which some phones (vivo) put
+  // back to "E" within seconds. Cleared again on restore.
+  for (const tag of ctTags(accountId)) {
+    const ok = await d.run({ t: "setTagLevel", tag, level: "V" }).then(
+      () => true,
+      () => false,
+    );
+    if (ok) undo.push(() => d.run({ t: "setTagLevel", tag, level: "" }));
+  }
   const restore = async () => {
     for (const u of undo.reverse()) await u().catch(() => {});
     undo.length = 0;
@@ -189,4 +202,10 @@ function parseScreen(out: string) {
   const awake = !/mWakefulness=(Asleep|Dozing)/.test(out);
   const locked = /(mKeyguardShowing|mShowingLockscreen|mDreamingLockscreen|isKeyguardShowing)=true/.test(out);
   return { awake, locked };
+}
+
+/** Log tags the CleverTap SDK writes under (plus our probe), valid as property names. */
+export function ctTags(accountId?: string): string[] {
+  const acct = accountId?.trim().toUpperCase();
+  return ["CleverTap", "CTAuditProbe", ...(acct && /^[A-Z0-9-]{4,20}$/.test(acct) ? [`CleverTap:${acct}`] : [])];
 }

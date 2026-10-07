@@ -2,13 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAudit, summarize, setItemStatus, deleteAudit, useMounted, api, refreshAudit } from "@/lib/store";
+import { useAudit, summarize, setItemStatus, deleteAudit, useMounted } from "@/lib/store";
 import { itemsForPlatform, methodFor, TIER_LABELS } from "@/lib/checklist";
 import { getFaq } from "@/lib/faq";
-import { PLATFORM_META, MODE_META, STATUS_META, METHOD_META, REGIONS, LIVE_GUIDE, DOCS_HELP, HOW_TO_CHECK, ANDROID_NOTES, STATUS_LEGEND } from "@/lib/meta";
+import { PLATFORM_META, MODE_META, STATUS_META, REGIONS, LIVE_GUIDE, DOCS_HELP, HOW_TO_CHECK, ANDROID_NOTES, STATUS_LEGEND } from "@/lib/meta";
 import type { Audit, ChecklistItem, ItemResult, ItemStatus, Platform } from "@/lib/types";
 import type { AndroidScanReport } from "@/lib/analyzer/types";
-import { rememberPasscode, useSecrets } from "@/lib/session-secrets";
 import { DeviceLab } from "./DeviceLab";
 import { CriticalEvents } from "./CriticalEvents";
 import { Card, Button, ProgressRing, StatusBadge, MethodBadge, PlatformIcon, StatBar, EmptyState, Badge } from "@/components/ui";
@@ -266,10 +265,8 @@ export function Results({ id }: { id: string }) {
         </Card>
       )}
 
-      {/* API checks */}
-      {audit.platform === "android" && audit.accountId && <ApiPanel audit={audit} />}
 
-      {/* Business-critical events (editable) */}
+      {/* Custom events to verify (editable) */}
       {audit.platform === "android" && <CriticalEvents audit={audit} />}
 
       {/* Live device: USB / Wi-Fi / no cable */}
@@ -378,30 +375,31 @@ function Banner({
 
 /* ---------------- scan summary ---------------- */
 
-function ScanSummary({ scan, audit }: { scan: AndroidScanReport; audit: Audit }) {
-  const [open, setOpen] = useState(false);
+function ScanSummary({ scan }: { scan: AndroidScanReport; audit: Audit }) {
   const ct = scan.clevertap;
-  const sdk = ct.coreVersion ? `v${ct.coreVersion}` : ct.minVersionEstimate ? `≥ ${ct.minVersionEstimate}` : ct.present ? "version unknown" : "not found";
+  const sdk = ct.coreVersion ? `v${ct.coreVersion}` : ct.present ? "found" : "not found";
   const facts: [string, string][] = [
-    ["Package", scan.app.packageName ?? "—"],
-    ["App version", [scan.app.versionName, scan.app.versionCode && `(${scan.app.versionCode})`].filter(Boolean).join(" ") || "—"],
-    ["Framework", FRAMEWORK_LABEL[scan.framework.primary] + (scan.framework.hermes ? " · Hermes" : "") + (scan.framework.expo ? " · Expo" : "")],
+    ["App", scan.app.packageName ?? "—"],
+    ["Version", scan.app.versionName ?? "—"],
+    ["Framework", FRAMEWORK_LABEL[scan.framework.primary]],
     ["CleverTap SDK", sdk],
-    ["Target / min SDK", `${scan.app.targetSdk ?? "?"} / ${scan.app.minSdk ?? "?"}`],
-    ["Build", `${scan.file.kind.toUpperCase()} · ${scan.app.debuggable ? "debug" : "release"}${scan.obfuscated ? " · minified" : ""}`],
   ];
   return (
     <Card className="overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b bg-surface-2 px-5 py-3.5">
-        <div className="flex items-center gap-2">
-          <Icon name="android" size={17} className="text-[var(--pass)]" />
-          <h2 className="text-sm font-semibold">What we found in the build</h2>
-        </div>
-        <span className="text-xs text-muted">
-          Scanned {scan.scannedIn === "browser" ? "in the browser" : "on the server"} in {(scan.durationMs / 1000).toFixed(1)}s
-        </span>
+      <div className="flex items-center gap-2 border-b bg-surface-2 px-5 py-3.5">
+        <Icon name="android" size={17} className="text-[var(--pass)]" />
+        <h2 className="text-sm font-semibold">Your build</h2>
       </div>
-      <div className="grid grid-cols-2 gap-px bg-[var(--border)] sm:grid-cols-3">
+      {scan.notes.some((n) => /debug \(JIT\)/.test(n)) && (
+        <div className="flex items-start gap-2 border-b px-5 py-2.5 text-xs" style={{ background: "var(--warn-soft)" }}>
+          <Icon name="info" size={14} className="mt-0.5 shrink-0" />
+          <span>
+            <b>This is a debug build.</b> Some code checks can&apos;t read it — upload the release APK (<code className="font-mono">flutter build apk --release</code>)
+            for full results.
+          </span>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-px bg-[var(--border)] sm:grid-cols-4">
         {facts.map(([k, v]) => (
           <div key={k} className="bg-surface px-4 py-3">
             <div className="text-[11px] font-medium uppercase tracking-wide text-muted-2">{k}</div>
@@ -411,170 +409,7 @@ function ScanSummary({ scan, audit }: { scan: AndroidScanReport; audit: Audit })
           </div>
         ))}
       </div>
-      <div className="space-y-3 px-5 py-4">
-        <div className="flex flex-wrap gap-1.5">
-          {ct.wrapper && <Badge tone="brand">{ct.wrapper.label}</Badge>}
-          {ct.modules.map((m) => (
-            <Badge key={m.id} tone="neutral">
-              {m.label}
-              {m.version ? ` ${m.version}` : ""}
-            </Badge>
-          ))}
-          {scan.eventNames.length > 0 && <Badge tone="accent">{scan.eventNames.length} event names in code</Badge>}
-        </div>
-        {scan.notes.length > 0 && (
-          <ul className="space-y-1">
-            {scan.notes.map((n) => (
-              <li key={n} className="flex gap-2 text-xs leading-relaxed text-muted">
-                <Icon name="info" size={13} className="mt-0.5 shrink-0 text-accent" />
-                {n}
-              </li>
-            ))}
-          </ul>
-        )}
-        <button onClick={() => setOpen((v) => !v)} className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline">
-          <Icon name="chevronDown" size={13} className={cx("transition", open && "rotate-180")} />
-          {open ? "Hide" : "Show"} manifest & code details
-        </button>
-        {open && (
-          <div className="grid gap-4 text-xs md:grid-cols-2">
-            <DetailList
-              title="CleverTap manifest keys"
-              rows={Object.entries(scan.manifest.metaData).map(([k, v]) => `${k} = ${k === "CLEVERTAP_TOKEN" ? v.slice(0, 3) + "•••" : v}`)}
-            />
-            <DetailList
-              title="API calls found"
-              rows={Object.entries(scan.apis)
-                .filter(([, u]) => u.found)
-                .map(([k, u]) => `${k} — ${u.layers.join(", ")}${u.confidence !== "high" ? ` (${u.confidence} confidence)` : ""}`)}
-            />
-            <DetailList title="Event names in code" rows={scan.eventNames} />
-            <DetailList title="CleverTap components" rows={scan.manifest.ctComponents} />
-            {audit.api?.ok && (
-              <DetailList
-                title="CleverTap API sample"
-                rows={Object.values(audit.api.events).map(
-                  (e) => `${e.name}: ${e.error ? e.error : `${e.capped ? "≥" : ""}${e.androidSampled} in ${e.windowDays}d`}`,
-                )}
-              />
-            )}
-          </div>
-        )}
-      </div>
     </Card>
-  );
-}
-
-function DetailList({ title, rows }: { title: string; rows: string[] }) {
-  return (
-    <div>
-      <div className="mb-1 font-semibold text-muted-2 uppercase tracking-wide text-[11px]">{title}</div>
-      {rows.length === 0 ? (
-        <div className="text-muted">None</div>
-      ) : (
-        <ul className="space-y-0.5 font-mono text-[11.5px] leading-relaxed">
-          {rows.slice(0, 30).map((r) => (
-            <li key={r} className="break-all">
-              {r}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-/* ---------------- API panel: run / re-run checks ---------------- */
-
-function ApiPanel({ audit }: { audit: Audit }) {
-  const { passcode } = useSecrets(audit.id);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
-  const a = audit.api;
-  const push = a?.messages?.push;
-  const inapp = a?.messages?.inapp;
-
-  async function verify() {
-    setBusy(true);
-    setMsg(null);
-    try {
-      const r = await api<{ ok: boolean; error?: string }>(`/api/audits/${audit.id}/verify`, {
-        method: "POST",
-        body: JSON.stringify({ passcode }),
-      });
-      setMsg(r.ok ? { tone: "ok", text: "API checks updated." } : { tone: "err", text: r.error ?? "Verification failed." });
-    } catch (e) {
-      setMsg({ tone: "err", text: (e as Error).message });
-    } finally {
-      setBusy(false);
-      refreshAudit(audit.id);
-    }
-  }
-
-  return (
-    <Card className="overflow-hidden">
-      <div className="border-b bg-surface-2 px-5 py-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Icon name="key" size={17} className="text-accent" />
-          <h2 className="font-semibold">CleverTap API checks</h2>
-          {a?.ok ? (
-            <Badge tone="success">Verified {formatDate(a.checkedAt)}</Badge>
-          ) : a && a.error !== "Not verified yet" ? (
-            <Badge tone="danger">Failed: {a.error}</Badge>
-          ) : (
-            <Badge tone="neutral">Not run</Badge>
-          )}
-        </div>
-        <p className="mt-1 text-sm text-muted">
-          Reads events, profiles and campaign stats from your account. The passcode stays in this tab&apos;s memory only.
-        </p>
-      </div>
-      <div className="flex flex-wrap items-end gap-3 p-5">
-        <MiniField label="Passcode">
-          <input
-            type="password"
-            autoComplete="new-password"
-            data-1p-ignore
-            data-lpignore="true"
-            value={passcode}
-            onChange={(e) => rememberPasscode(audit.id, e.target.value)}
-            className="input w-64 font-mono"
-            placeholder="••••••••"
-          />
-        </MiniField>
-        <Button size="sm" variant="secondary" icon="refresh" disabled={passcode.length < 3 || busy} onClick={verify}>
-          {busy ? "Verifying… (up to a minute)" : a?.ok ? "Re-run API checks" : "Run API checks"}
-        </Button>
-        {a?.ok && (
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-            {a.realtime && <span>Android users online now: <b className="text-text">{a.realtime.android}</b></span>}
-            {push && !push.error && (
-              <span>
-                Push (30 d): {push.sent} sent · {push.viewed} viewed · {push.clicked} clicked
-              </span>
-            )}
-            {inapp && <span>In-app (30 d): {inapp.viewed} viewed</span>}
-          </div>
-        )}
-      </div>
-      {msg && (
-        <div
-          className="mx-5 mb-5 rounded-lg px-3 py-2 text-xs"
-          style={{ background: msg.tone === "ok" ? "var(--pass-soft)" : "var(--fail-soft)", color: msg.tone === "ok" ? "var(--pass)" : "var(--fail)" }}
-        >
-          {msg.text}
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function MiniField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
-      {children}
-    </label>
   );
 }
 
@@ -769,7 +604,7 @@ function ItemRow({
           <Detail label="Expected">{item.expected}</Detail>
           {result?.evidence && <Detail label="What we found">{result.evidence}</Detail>}
           {HOW_TO_CHECK[item.id] && status !== "pass" && status !== "na" && <HowToCheck id={item.id} />}
-          {platform === "android" && ANDROID_NOTES[item.id] && (
+          {platform === "android" && ANDROID_NOTES[item.id] && status !== "pass" && status !== "na" && (
             <div className="rounded-xl border bg-surface-2 p-3.5">
               <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-muted">
                 <Icon name="alert" size={13} /> Android limits (CleverTap docs)
@@ -780,10 +615,10 @@ function ItemRow({
               </a>
             </div>
           )}
-          {result?.details && result.details.length > 0 && (
-            <Detail label="Details">
-              <ul className="mt-1 space-y-0.5 font-mono text-[12px] text-muted">
-                {result.details.map((d) => (
+          {result?.details && result.details.length > 0 && (status === "fail" || status === "warn") && (
+            <Detail label="Where">
+              <ul className="mt-1 space-y-0.5 text-[13px] text-muted">
+                {result.details.slice(0, 6).map((d) => (
                   <li key={d} className="break-all">
                     {d}
                   </li>
@@ -791,10 +626,6 @@ function ItemRow({
               </ul>
             </Detail>
           )}
-          <Detail label="Verification method">
-            {METHOD_META[method].label} — {METHOD_META[method].desc}
-            {result?.source && result.source !== "none" && <span className="text-muted"> · source: {result.source}</span>}
-          </Detail>
 
           {result?.remediation && (status === "fail" || status === "warn") && (
             <div className="rounded-xl border p-3.5" style={{ background: "var(--fail-soft)" }}>

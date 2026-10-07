@@ -102,9 +102,9 @@ export async function runPushTest(
   let stateDetail = "";
   try {
     onStep(`Preparing: app ${state}`);
+    // wake the screen; the lock flag alone isn't trusted (some phones, e.g. vivo,
+    // report a keyguard while unlocked) — it only matters if the app can't come to front
     const scr = await soft(readyScreen(d));
-    if (scr?.locked && state === "foreground")
-      return { status: "error", verifiedState, stateDetail: "phone locked", sentAt: Date.now(), detail: "Unlock the phone (keep the screen on), then press Test again." };
     await d.run({ t: "launch", pkg });
     await sleep(3500);
     if (state !== "foreground") {
@@ -122,8 +122,14 @@ export async function runPushTest(
       }
     }
     const pid = (await d.run({ t: "pidof", pkg })).trim();
-    const focus = await d.run({ t: "focus" });
-    const inFront = focus.includes(pkg + "/");
+    let inFront = (await d.run({ t: "focus" })).includes(pkg + "/");
+    if (state === "foreground" && !inFront) {
+      // give a slow app one more moment before deciding
+      await sleep(2500);
+      inFront = (await d.run({ t: "focus" })).includes(pkg + "/");
+      if (!inFront && scr?.locked)
+        return { status: "error", verifiedState, stateDetail: "app not on screen", sentAt: Date.now(), detail: "The app couldn't come to the front — unlock the phone (keep the screen on), then press Test again." };
+    }
     if (state === "foreground") verifiedState = inFront;
     else if (state === "background") verifiedState = !inFront && pid.length > 0;
     else verifiedState = pid.length === 0;

@@ -56,7 +56,6 @@ export function LogSession({
   const [url, setUrl] = useState("https://www.clevertap.com");
   const [err, setErr] = useState("");
   const [logging, setLogging] = useState<LoggingState | undefined>(initial?.logging);
-  const [locked, setLocked] = useState(false);
   const [startedAt, setStartedAt] = useState(0);
   const [now, setNow] = useState(0);
   const restoreRef = useRef<(() => Promise<void>) | null>(null);
@@ -217,8 +216,7 @@ export function LogSession({
       restoreRef.current = restore;
       setLogging(state);
       setRestricted(state.status === "lifted");
-      const scr = await readyScreen(driver).catch(() => undefined);
-      setLocked(!!scr?.locked);
+      await readyScreen(driver).catch(() => undefined); // wake the screen
       await driver.run({ t: "logcatClear" });
       await driver.run({ t: "forceStop", pkg });
       await driver.run({ t: "launch", pkg });
@@ -326,7 +324,6 @@ export function LogSession({
           {logging.fix}
         </Hint>
       )}
-      {active && locked && <Hint title="Unlock the phone">Keep it unlocked with the screen on — in-apps and taps can&apos;t happen on the lock screen.</Hint>}
       {active && noLines && zeroCause === "not-running" && (
         <Hint title="The app wasn't running">We opened it again on the phone. Keep it open for a few seconds.</Hint>
       )}

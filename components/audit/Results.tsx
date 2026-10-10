@@ -422,13 +422,6 @@ export function Results({ id }: { id: string }) {
             </div>
           </div>
 
-          {/* ---------- Guided checks: key events come first ---------- */}
-          {hasLab && (
-            <div hidden={current.id !== "guided"} className="mb-5">
-              <CriticalEvents audit={audit} />
-            </div>
-          )}
-
           {/* ---------- Device stages (always mounted) ---------- */}
           {hasLab && <DeviceLab audit={audit} view={deviceView} onNavigate={(v) => setStage(v)} />}
 
@@ -446,29 +439,31 @@ export function Results({ id }: { id: string }) {
 
           {/* ---------- All checks ---------- */}
           <div className={cx(current.id !== "all" && "hidden print:mt-10 print:block")}>
-            <div className="mb-5 flex flex-wrap items-center gap-2">
-              {filters.map((f) => (
-                <button
-                  key={f.key}
-                  onClick={() => setFilter(f.key)}
-                  aria-pressed={filter === f.key}
-                  className={cx(
-                    "inline-flex min-h-10 items-center gap-2 rounded-full border-[1.5px] px-4 text-sm font-bold transition",
-                    filter === f.key ? "border-brand bg-brand-soft text-brand-text" : "border-[var(--border-strong)] bg-surface text-text-2 hover:bg-surface-2",
-                  )}
-                >
-                  {f.label}
-                  <span className="font-semibold text-muted">{f.count}</span>
-                </button>
-              ))}
-              <div className="relative ml-auto w-full sm:w-auto">
+            <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
+              <div className="flex flex-wrap items-center gap-2">
+                {filters.map((f) => (
+                  <button
+                    key={f.key}
+                    onClick={() => setFilter(f.key)}
+                    aria-pressed={filter === f.key}
+                    className={cx(
+                      "inline-flex min-h-10 items-center gap-2 rounded-full border-[1.5px] px-4 text-sm font-bold transition",
+                      filter === f.key ? "border-brand bg-brand-soft text-brand-text" : "border-[var(--border-strong)] bg-surface text-text-2 hover:bg-surface-2",
+                    )}
+                  >
+                    {f.label}
+                    <span className="font-semibold text-muted">{f.count}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="relative order-first w-full shrink-0 sm:max-w-sm lg:order-none lg:w-64">
                 <Icon name="search" size={17} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-2" />
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Find a check"
                   aria-label="Find a check"
-                  className="input pl-10 sm:w-60"
+                  className="input w-full pl-10"
                 />
               </div>
             </div>

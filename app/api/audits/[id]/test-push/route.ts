@@ -60,7 +60,13 @@ export const POST = handle(async (req, ctx: RouteContext<"/api/audits/[id]/test-
   }
   api.testPush = record;
   if (input.appState) api.pushTests = { ...api.pushTests, [input.appState]: record };
-  await updateAudit(id, { api });
-  await recompute(id);
+  // The push is already on its way — a failed save must not report the send as
+  // failed. The device results are saved (and recomputed) again right after.
+  try {
+    await updateAudit(id, { api });
+    await recompute(id);
+  } catch (e) {
+    console.error(`test-push ${id}: saving the record failed`, e);
+  }
   return Response.json({ testPush: record });
 });

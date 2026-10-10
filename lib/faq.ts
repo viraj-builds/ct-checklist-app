@@ -99,7 +99,7 @@ export const FAQS: FaqEntry[] = [
     links: [
       {
         label: "Push troubleshooting",
-        url: "https://docs.clevertap.com/docs/troubleshooting-faqs-push-notifications",
+        url: "https://docs.clevertap.com/docs/faqs-push-notifications",
       },
     ],
     tags: ["ios", "apns", "push"],
@@ -123,7 +123,7 @@ export const FAQS: FaqEntry[] = [
       },
       {
         label: "Add the service worker file",
-        url: "https://developer.clevertap.com/docs/web-push#add-the-service-worker-file",
+        url: "https://developer.clevertap.com/docs/web-push#adding-the-service-worker-file",
       },
     ],
     tags: ["web", "push", "service-worker"],
@@ -162,11 +162,11 @@ export const FAQS: FaqEntry[] = [
     links: [
       {
         label: "Deep link external URL",
-        url: "https://developer.clevertap.com/docs/android-push#deeplinkexternal-url",
+        url: "https://developer.clevertap.com/docs/advanced-android-push-notification-options#deeplinkexternal-url",
       },
       {
         label: "Action buttons",
-        url: "https://developer.clevertap.com/docs/android-push#action-buttons",
+        url: "https://developer.clevertap.com/docs/advanced-android-push-notification-options#action-buttons",
       },
     ],
     tags: ["deeplink", "android", "ios"],

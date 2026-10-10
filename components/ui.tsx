@@ -42,6 +42,8 @@ type BtnProps = {
   onClick?: () => void;
   href?: string;
   disabled?: boolean;
+  /** shows a spinner and blocks clicks while a slow action runs */
+  loading?: boolean;
   type?: "button" | "submit";
   full?: boolean;
 };
@@ -56,11 +58,14 @@ export function Button({
   onClick,
   href,
   disabled,
+  loading,
   type = "button",
   full,
 }: BtnProps) {
-  const base =
-    "inline-flex items-center justify-center gap-2 font-bold rounded-[10px] transition-colors select-none whitespace-nowrap disabled:opacity-50 disabled:pointer-events-none";
+  const base = cx(
+    "inline-flex items-center justify-center gap-2 font-bold rounded-[10px] transition-colors select-none whitespace-nowrap disabled:pointer-events-none",
+    loading ? "cursor-wait" : "disabled:opacity-50",
+  );
   const sizes = {
     sm: "text-sm min-h-10 px-3.5",
     md: "text-[15px] min-h-11 px-4.5",
@@ -77,7 +82,15 @@ export function Button({
   const cls = cx(base, sizes, variants, full && "w-full", className);
   const inner = (
     <>
-      {icon && <Icon name={icon} size={size === "sm" ? 16 : 18} />}
+      {loading ? (
+        <span
+          aria-hidden
+          className="animate-spin-slow shrink-0 rounded-full border-2 border-current border-t-transparent"
+          style={{ width: size === "sm" ? 14 : 16, height: size === "sm" ? 14 : 16 }}
+        />
+      ) : (
+        icon && <Icon name={icon} size={size === "sm" ? 16 : 18} />
+      )}
       {children}
       {iconRight && <Icon name={iconRight} size={size === "sm" ? 16 : 18} />}
     </>
@@ -89,7 +102,7 @@ export function Button({
       </Link>
     );
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={cls}>
+    <button type={type} onClick={onClick} disabled={disabled || loading} aria-busy={loading || undefined} className={cls}>
       {inner}
     </button>
   );

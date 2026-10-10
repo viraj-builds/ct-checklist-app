@@ -101,8 +101,8 @@ export function CriticalEvents({ audit }: { audit: Audit }) {
         <Button variant="secondary" icon="plus" disabled={!input.trim() || list.length >= 10} onClick={() => add(input)}>
           Add
         </Button>
-        <Button icon="check" disabled={!dirty || busy} onClick={save}>
-          {busy ? "Saving…" : "Save events"}
+        <Button icon="check" variant={dirty ? "primary" : "secondary"} loading={busy} disabled={!dirty} onClick={save}>
+          {busy ? "Saving…" : dirty || !saved.length ? "Save events" : "Saved"}
         </Button>
       </div>
 

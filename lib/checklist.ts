@@ -264,7 +264,7 @@ export const CHECKLIST: ChecklistItem[] = [
     title: "Deep link — external URL",
     expected: "Push with an external deep link redirects correctly.",
     method: "hybrid",
-    docUrl: "https://developer.clevertap.com/docs/android-push#deeplinkexternal-url",
+    docUrl: "https://developer.clevertap.com/docs/advanced-android-push-notification-options#deeplinkexternal-url",
     faqRef: 9,
   },
   {
@@ -285,7 +285,7 @@ export const CHECKLIST: ChecklistItem[] = [
     expected: "Splash / loading screens are excluded from in-app display.",
     method: "manual",
     methodByPlatform: { android: "auto-static" },
-    docUrl: "https://developer.clevertap.com/docs/android-in-app#exclude-activities",
+    docUrl: "https://developer.clevertap.com/docs/android-in-app-notifications#exclude-in-app-from-android-activity",
   },
   {
     id: "app-t3-post-notifications",
@@ -297,7 +297,7 @@ export const CHECKLIST: ChecklistItem[] = [
       "Apps targeting API 33+ declare POST_NOTIFICATIONS and ask for it at runtime (e.g. CleverTap's push primer), or pushes are silently blocked.",
     method: "auto-static",
     origin: "sdk",
-    docUrl: "https://developer.clevertap.com/docs/push-primer",
+    docUrl: "https://developer.clevertap.com/docs/android-13-updates#invoke-push-primer-flow",
   },
   {
     id: "app-t3-uninstall",
@@ -307,7 +307,7 @@ export const CHECKLIST: ChecklistItem[] = [
     title: "App uninstall tracking switched on",
     expected: "Uninstall tracking is enabled.",
     method: "auto-api",
-    docUrl: "https://developer.clevertap.com/docs/uninstall-tracking",
+    docUrl: "https://developer.clevertap.com/docs/uninstall-tracking-using-firebase",
   },
   {
     id: "app-t3-session-analytics",

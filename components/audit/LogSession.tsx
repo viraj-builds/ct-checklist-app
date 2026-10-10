@@ -36,6 +36,7 @@ export function LogSession({
   onSave,
   autoStart,
   accountId,
+  beforeSteps,
 }: {
   driver: DeviceDriver;
   pkg: string;
@@ -45,13 +46,14 @@ export function LogSession({
   onSave: (s: LogSessionSave) => Promise<void>;
   autoStart?: boolean; // start listening as soon as the phone is connected
   accountId?: string; // CleverTap account — its log tag is pinned to verbose
+  beforeSteps?: ReactNode; // shown between the Start bar and the steps (e.g. key events)
 }) {
   const [active, setActive] = useState(false);
   const [starting, setStarting] = useState(false);
   const [ins, setIns] = useState<LogInsights | null>(initial?.logs ?? null);
   const [sc, setSc] = useState<LogScenarios>(initial?.logScenarios ?? {});
   const [restricted, setRestricted] = useState(!!initial?.logTagWasRestricted);
-  const [waiting, setWaiting] = useState<"" | "relaunch" | "tap">("");
+  const [waiting, setWaiting] = useState<"" | "relaunch" | "restart" | "sending" | "tap">("");
   const [url, setUrl] = useState("https://www.clevertap.com");
   const [err, setErr] = useState("");
   const [logging, setLogging] = useState<LoggingState | undefined>(initial?.logging);
@@ -259,7 +261,7 @@ export function LogSession({
 
   async function restartOnly() {
     setErr("");
-    setWaiting("relaunch");
+    setWaiting("restart");
     try {
       await driver.run({ t: "forceStop", pkg });
       await driver.run({ t: "launch", pkg });
@@ -273,15 +275,18 @@ export function LogSession({
 
   async function sendLink() {
     setErr("");
+    setWaiting("sending");
     try {
       mark.current = (await read()).lines;
       tapMarker.current = Math.random().toString(36).slice(2, 10);
       tapSeenInShade.current = false;
       tapStartedAt.current = Date.now();
       await sendPush(url.trim(), tapMarker.current);
+      setSc((s) => ({ ...s, linkTap: undefined })); // a new send replaces the last result
       setWaiting("tap");
     } catch (e) {
       setErr((e as Error).message);
+      setWaiting("");
     }
   }
 
@@ -312,7 +317,7 @@ export function LogSession({
           <p className="mt-0.5 text-sm text-muted">Do each action below on the phone. We confirm it from the SDK logs. Nothing personal is saved.</p>
         </div>
         {!active ? (
-          <Button icon="terminal" disabled={starting} onClick={start}>
+          <Button icon="terminal" loading={starting} onClick={start}>
             {starting ? "Starting…" : ins ? "Start again" : "Start (restarts the app)"}
           </Button>
         ) : (
@@ -345,6 +350,8 @@ export function LogSession({
           {err}
         </p>
       )}
+
+      {beforeSteps}
 
       <Card className="overflow-hidden">
         <Step
@@ -393,7 +400,7 @@ export function LogSession({
           ok={okC}
           rows={sc.relaunch ? [["Result", sc.relaunch.onUserLoginOnStart ? "identified on start ✓" : "not identified on start"]] : []}
           action={
-            <Button size="sm" variant="secondary" icon="refresh" disabled={!active || !!waiting} onClick={relaunch}>
+            <Button size="sm" variant="secondary" icon="refresh" loading={waiting === "relaunch"} disabled={!active || !!waiting} onClick={relaunch}>
               {waiting === "relaunch" ? "Watching (15 s)…" : "Restart the app for me"}
             </Button>
           }
@@ -418,9 +425,11 @@ export function LogSession({
                   ["Link", sc.linkTap.url],
                   ["Opened", sc.linkTap.landed ? `${sc.linkTap.landed}${sc.linkTap.openedOutsideApp ? " (outside the app)" : ""}` : "unknown"],
                 ]
-              : waiting === "tap"
-                ? [["Waiting", "Tap the notification on the phone…"]]
-                : []
+              : waiting === "sending"
+                ? [["Sending", "Asking CleverTap to send the push — this can take 10–20 s…"]]
+                : waiting === "tap"
+                  ? [["Sent", "Tap the notification on the phone…"]]
+                  : []
           }
           action={
             <div className="flex w-full flex-wrap gap-2">
@@ -431,8 +440,14 @@ export function LogSession({
                 placeholder="https://… or myapp://screen"
                 aria-label="Link to send in the push"
               />
-              <Button variant="secondary" icon="bell" disabled={!active || !!waiting || !!canSendPush || !url.trim()} onClick={sendLink}>
-                Send push
+              <Button
+                variant="secondary"
+                icon={waiting === "tap" ? "refresh" : "bell"}
+                loading={waiting === "sending"}
+                disabled={!active || (!!waiting && waiting !== "tap") || !!canSendPush || !url.trim()}
+                onClick={sendLink}
+              >
+                {waiting === "sending" ? "Sending…" : waiting === "tap" ? "Sent — send again" : sc.linkTap ? "Send another" : "Send push"}
               </Button>
               {canSendPush && <span className="w-full text-sm text-muted">{canSendPush}</span>}
             </div>
@@ -450,8 +465,8 @@ export function LogSession({
             ...(ins?.inApp?.blockedOnExcludedScreen ? ([["Excluded screen", "respected ✓"]] as [string, string][]) : []),
           ]}
           action={
-            <Button size="sm" variant="secondary" icon="refresh" disabled={!active || !!waiting} onClick={restartOnly}>
-              {waiting === "relaunch" ? "Restarting…" : "Restart the app"}
+            <Button size="sm" variant="secondary" icon="refresh" loading={waiting === "restart"} disabled={!active || !!waiting} onClick={restartOnly}>
+              {waiting === "restart" ? "Restarting…" : "Restart the app"}
             </Button>
           }
         />

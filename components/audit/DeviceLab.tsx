@@ -22,6 +22,7 @@ import type { Audit } from "@/lib/types";
 import type { TestPushRecord, TestUserRecord } from "@/lib/clevertap/types";
 import { Card, Button, Notice, StatusMark } from "@/components/ui";
 import { LogSession, type LogSessionSave } from "./LogSession";
+import { CriticalEvents } from "./CriticalEvents";
 import { mergeInsights } from "@/lib/device/ctlog";
 import { Icon } from "@/components/Icon";
 import { cx, formatDate } from "@/lib/format";
@@ -330,7 +331,7 @@ export function DeviceLab({
                 </Field>
               </div>
               <div className="mt-4">
-                <Button variant="secondary" icon="search" disabled={!!needCreds || !!busy} onClick={checkTestUser}>
+                <Button variant="secondary" icon="search" loading={busy === "user"} disabled={!!needCreds || !!busy} onClick={checkTestUser}>
                   {busy === "user" ? "Checking…" : "Check test user"}
                 </Button>
               </div>
@@ -360,7 +361,9 @@ export function DeviceLab({
                 ))}
               </div>
               {mode === "usb" && <UsbConnect supported={typeof window !== "undefined" && webUsbSupported()} busy={busy === "connect"} onConnect={connect} />}
-              {mode === "helper" && <HelperConnect onDriver={setDriver} onError={(t) => setMsg({ tone: "err", text: t })} />}
+              {mode === "helper" && (
+                <HelperConnect activeSerial={driver?.serial} onDriver={setDriver} onError={(t) => setMsg({ tone: "err", text: t })} />
+              )}
               <p className="mt-4 text-sm text-muted">
                 Both work the same way. USB needs Chrome or Edge. Wi-Fi needs the small helper, because browsers can&apos;t reach a phone over the network.
               </p>
@@ -393,7 +396,7 @@ export function DeviceLab({
                   <input value={channel} onChange={(e) => setChannel(e.target.value)} className="input font-mono" placeholder="channel id" />
                 </Field>
                 {driver && (
-                  <Button variant="secondary" icon="search" disabled={!!busy || !pkg} onClick={deviceChecks}>
+                  <Button variant="secondary" icon="search" loading={busy === "checks"} disabled={!!busy || !pkg} onClick={deviceChecks}>
                     {busy === "checks" ? "Checking…" : "Read the phone again"}
                   </Button>
                 )}
@@ -455,20 +458,24 @@ export function DeviceLab({
               canSendPush={needCreds}
               sendPush={sendLinkPush}
               onSave={saveLogs}
+              beforeSteps={<CriticalEvents audit={audit} />}
             />
           ) : (
-            <Card className="p-6">
-              <p className="text-[15px] text-text-2">
-                Connect your phone first. Then do each action shown here — log in, restart, your key actions, a push with a link and an in-app.
-              </p>
-              {onNavigate && (
-                <div className="mt-4">
-                  <Button iconRight="arrowRight" onClick={() => onNavigate("setup")}>
-                    Connect your phone
-                  </Button>
-                </div>
-              )}
-            </Card>
+            <div className="space-y-5">
+              <Card className="p-6">
+                <p className="text-[15px] text-text-2">
+                  Connect your phone first. Then do each action shown here — log in, restart, your key actions, a push with a link and an in-app.
+                </p>
+                {onNavigate && (
+                  <div className="mt-4">
+                    <Button iconRight="arrowRight" onClick={() => onNavigate("setup")}>
+                      Connect your phone
+                    </Button>
+                  </div>
+                )}
+              </Card>
+              <CriticalEvents audit={audit} />
+            </div>
           )}
         </div>
       </div>
@@ -550,21 +557,29 @@ function UsbConnect({ supported, busy, onConnect }: { supported: boolean; busy: 
         </li>
         <li>Press Connect phone, pick the phone, then tap “Allow” on the phone.</li>
       </ol>
-      <Button icon="link" disabled={busy} onClick={onConnect}>
+      <Button icon="link" loading={busy} onClick={onConnect}>
         {busy ? "Connecting…" : "Connect phone"}
       </Button>
     </div>
   );
 }
 
-function HelperConnect({ onDriver, onError }: { onDriver: (d: DeviceDriver) => void; onError: (t: string) => void }) {
+function HelperConnect({
+  activeSerial,
+  onDriver,
+  onError,
+}: {
+  activeSerial?: string;
+  onDriver: (d: DeviceDriver) => void;
+  onError: (t: string) => void;
+}) {
   const [token, setToken] = useState("");
   const [devices, setDevices] = useState<HelperDevice[] | null>(null);
   const [ip, setIp] = useState("");
   const [pairPort, setPairPort] = useState("");
   const [code, setCode] = useState("");
   const [connPort, setConnPort] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"" | "pair" | "connect">("");
   const [os, setOs] = useState<"win" | "mac">(() =>
     typeof navigator !== "undefined" && /Mac|Linux/i.test(navigator.platform) ? "mac" : "win",
   );
@@ -577,14 +592,14 @@ function HelperConnect({ onDriver, onError }: { onDriver: (d: DeviceDriver) => v
       ? `irm ${origin}/ct-device-bridge.mjs -OutFile ct-device-bridge.mjs; node ct-device-bridge.mjs --origin ${origin}`
       : `curl -fsSL -o ct-device-bridge.mjs ${origin}/ct-device-bridge.mjs && node ct-device-bridge.mjs --origin ${origin}`;
 
-  async function run(fn: () => Promise<void>) {
-    setBusy(true);
+  async function run(name: "pair" | "connect", fn: () => Promise<void>) {
+    setBusy(name);
     try {
       await fn();
     } catch (e) {
       onError((e as Error).message);
     } finally {
-      setBusy(false);
+      setBusy("");
     }
   }
 
@@ -624,13 +639,13 @@ function HelperConnect({ onDriver, onError }: { onDriver: (d: DeviceDriver) => v
   }, [token, onDriver]);
 
   const pair = () =>
-    run(async () => {
+    run("pair", async () => {
       const r = await helperPair(token, ip.trim(), Number(pairPort), code.trim());
       if (!r.connected) onError("Paired. Now type the port shown on the main Wireless debugging screen and press Connect.");
       setDevices((await helperStatus(token)).devices);
     });
   const connectWifi = () =>
-    run(async () => {
+    run("connect", async () => {
       await helperConnect(token, ip.trim(), Number(connPort));
       setDevices((await helperStatus(token)).devices);
     });
@@ -705,16 +720,16 @@ function HelperConnect({ onDriver, onError }: { onDriver: (d: DeviceDriver) => v
             <input value={ip} onChange={(e) => setIp(e.target.value)} className="input font-mono" placeholder="IP, e.g. 192.168.0.103" aria-label="Phone IP address" />
             <input value={pairPort} onChange={(e) => setPairPort(e.target.value)} className="input font-mono" placeholder="Port in the pop-up" aria-label="Pairing port" />
             <input value={code} onChange={(e) => setCode(e.target.value)} className="input font-mono" placeholder="6-digit code" aria-label="Pairing code" />
-            <Button variant="secondary" disabled={!ip || !pairPort || code.trim().length !== 6 || busy} onClick={pair}>
-              {busy ? "Pairing…" : "Pair and connect"}
+            <Button variant="secondary" loading={busy === "pair"} disabled={!ip || !pairPort || code.trim().length !== 6 || !!busy} onClick={pair}>
+              {busy === "pair" ? "Pairing…" : "Pair and connect"}
             </Button>
           </div>
           <details className="mt-4">
             <summary className="cursor-pointer text-sm font-semibold text-muted">Paired before? Connect with the port on the main Wireless debugging screen</summary>
             <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
               <input value={connPort} onChange={(e) => setConnPort(e.target.value)} className="input font-mono" placeholder="Port, e.g. 37115" aria-label="Connection port" />
-              <Button variant="secondary" disabled={!ip || !connPort || busy} onClick={connectWifi}>
-                Connect
+              <Button variant="secondary" loading={busy === "connect"} disabled={!ip || !connPort || !!busy} onClick={connectWifi}>
+                {busy === "connect" ? "Connecting…" : "Connect"}
               </Button>
             </div>
           </details>
@@ -737,9 +752,20 @@ function HelperConnect({ onDriver, onError }: { onDriver: (d: DeviceDriver) => v
                   {d.transport === "wifi" ? "Wi-Fi" : "USB"} · {d.state}
                 </span>
               </span>
-              <Button size="sm" disabled={d.state !== "device"} onClick={() => onDriver(helperDriver(token, d))}>
-                {d.state === "unauthorized" ? "Tap “Allow” on the phone" : "Use this phone"}
-              </Button>
+              {d.serial === activeSerial ? (
+                <span className="flex items-center gap-2 text-sm font-bold" style={{ color: "var(--pass)" }}>
+                  <StatusMark status="pass" size={20} /> In use
+                </span>
+              ) : (
+                <Button
+                  size="sm"
+                  variant={activeSerial ? "secondary" : "primary"}
+                  disabled={d.state !== "device"}
+                  onClick={() => onDriver(helperDriver(token, d))}
+                >
+                  {d.state === "unauthorized" ? "Tap “Allow” on the phone" : activeSerial ? "Switch to this phone" : "Use this phone"}
+                </Button>
+              )}
             </div>
           ))}
         </div>
@@ -805,7 +831,7 @@ function StateRow({
           <p className="mt-1 text-sm text-muted">Likely the phone: {device.background.hints[0]}</p>
         ) : null}
       </div>
-      <Button variant={status?.m === "pass" ? "secondary" : "primary"} icon="bell" disabled={disabled} onClick={onRun}>
+      <Button variant={status?.m === "pass" ? "secondary" : "primary"} icon="bell" loading={busy} disabled={disabled} onClick={onRun}>
         {busy ? "Testing…" : status?.m === "pass" ? "Test again" : "Test"}
       </Button>
     </div>

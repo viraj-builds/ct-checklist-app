@@ -18,6 +18,21 @@ export function db(): SupabaseClient {
       "Supabase is not configured: set SUPABASE_URL and SUPABASE_SECRET_KEY in .env.local (see .env.example).",
     );
   }
-  client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: retryingFetch } });
   return client;
+}
+
+// Node's fetch reuses keep-alive sockets; after a quiet spell (e.g. a 30 s push
+// test) Supabase may already have closed one and the next call dies with
+// "TypeError: fetch failed" before reaching the server. Network errors only
+// (never HTTP responses) are retried on a fresh connection.
+async function retryingFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetch(input, init);
+    } catch (e) {
+      if (attempt >= 2 || !(e instanceof TypeError) || init?.signal?.aborted) throw e;
+      await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
+    }
+  }
 }

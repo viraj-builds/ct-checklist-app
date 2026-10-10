@@ -3,83 +3,61 @@
 import Link from "next/link";
 import type { Audit } from "@/lib/types";
 import { summarize } from "@/lib/store";
-import { timeAgo } from "@/lib/format";
-import { PLATFORM_META, MODE_META } from "@/lib/meta";
-import { Card, PlatformIcon, StatBar, Badge } from "@/components/ui";
+import { timeAgo, cx } from "@/lib/format";
+import { PLATFORM_META } from "@/lib/meta";
+import { PlatformIcon, StatBar, Badge } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 
-export function AuditCard({ audit }: { audit: Audit }) {
+// One audit as a list row: what it is, how far along, and what needs attention.
+export function AuditCard({ audit, first }: { audit: Audit; first?: boolean }) {
   const s = summarize(audit);
-  const scoreColor =
-    s.score >= 80 ? "var(--pass)" : s.score >= 50 ? "var(--warn)" : "var(--fail)";
+  const running = audit.status === "draft" || audit.status === "scanning" || audit.status === "verifying";
 
   return (
-    <Link href={`/audit/${audit.id}`}>
-      <Card hover className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-2">
-              <PlatformIcon platform={audit.platform} size={20} />
-            </span>
-            <div className="min-w-0">
-              <div className="truncate font-semibold">{audit.name}</div>
-              <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
-                <span>{PLATFORM_META[audit.platform].label}</span>
-                <span className="text-muted-2">·</span>
-                <span>{MODE_META[audit.mode].label}</span>
-              </div>
-            </div>
-          </div>
-          <div
-            className="text-right text-2xl font-bold leading-none"
-            style={{ color: scoreColor }}
-          >
-            {s.score}
-            <span className="text-xs font-medium text-muted">/100</span>
-          </div>
+    <Link
+      href={`/audit/${audit.id}`}
+      className={cx("group flex flex-wrap items-center gap-x-5 gap-y-3 px-5 py-4 transition-colors hover:bg-surface-2 sm:px-6", !first && "border-t")}
+    >
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-surface-3">
+        <PlatformIcon platform={audit.platform} size={22} />
+      </span>
+      <div className="min-w-0 flex-1 basis-48">
+        <div className="truncate text-base font-bold">{audit.name}</div>
+        <div className="mt-0.5 text-sm text-muted">
+          {PLATFORM_META[audit.platform].label} app · {timeAgo(audit.createdAt)}
         </div>
-
-        <div className="mt-4">
-          <StatBar
-            segments={[
-              { value: s.counts.pass, color: "var(--pass)" },
-              { value: s.counts.warn, color: "var(--warn)" },
-              { value: s.counts.fail, color: "var(--fail)" },
-              { value: s.counts.manual, color: "var(--manual)" },
-            ]}
-          />
-          <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-            <Legend color="var(--pass)" label={`${s.counts.pass} pass`} />
-            <Legend color="var(--warn)" label={`${s.counts.warn} warn`} />
-            <Legend color="var(--fail)" label={`${s.counts.fail} fail`} />
-            <Legend color="var(--manual)" label={`${s.counts.manual} manual`} />
-          </div>
+      </div>
+      <div className="hidden w-48 md:block">
+        <StatBar
+          total={s.total}
+          segments={[
+            { value: s.counts.pass, color: "var(--pass)" },
+            { value: s.counts.fail, color: "var(--fail)" },
+            { value: s.counts.warn, color: "var(--warn-dot)" },
+          ]}
+        />
+        <div className="mt-1.5 text-[13px] text-muted">
+          {s.counts.pass} of {s.total} passed
         </div>
-
-        <div className="mt-4 flex items-center justify-between border-t pt-3 text-xs text-muted">
-          <span className="flex items-center gap-1.5">
-            <Icon name="clock" size={13} /> {timeAgo(audit.createdAt)}
-          </span>
-          {s.counts.fail > 0 ? (
-            <Badge tone="danger">{s.counts.fail} to fix</Badge>
-          ) : s.counts.warn > 0 ? (
-            <Badge tone="warn">{s.counts.warn} to review</Badge>
-          ) : (
-            <Badge tone="success">
-              <Icon name="check" size={12} /> Clean
-            </Badge>
-          )}
-        </div>
-      </Card>
+      </div>
+      <div className="w-28 text-right">
+        {running ? (
+          <Badge tone="brand">Checking…</Badge>
+        ) : audit.status === "failed" ? (
+          <Badge tone="neutral">Didn&apos;t finish</Badge>
+        ) : s.counts.fail > 0 ? (
+          <Badge tone="danger">{s.counts.fail} to fix</Badge>
+        ) : s.counts.warn > 0 ? (
+          <Badge tone="warn">{s.counts.warn} to look at</Badge>
+        ) : s.counts.manual > 0 ? (
+          <Badge tone="brand">{s.counts.manual} to check</Badge>
+        ) : (
+          <Badge tone="success">
+            <Icon name="check" size={13} strokeWidth={2.6} /> All good
+          </Badge>
+        )}
+      </div>
+      <Icon name="chevronRight" size={20} className="shrink-0 text-muted-2 transition group-hover:translate-x-0.5" />
     </Link>
-  );
-}
-
-function Legend({ color, label }: { color: string; label: string }) {
-  return (
-    <span className="flex items-center gap-1">
-      <span className="h-2 w-2 rounded-full" style={{ background: color }} />
-      {label}
-    </span>
   );
 }

@@ -37,7 +37,15 @@ type IconName =
   | "bell"
   | "zap"
   | "lock"
-  | "refresh";
+  | "refresh"
+  | "home"
+  | "phone"
+  | "menu"
+  | "sidebar"
+  | "book"
+  | "auto"
+  | "flag"
+  | "activity";
 
 const paths: Record<IconName, React.ReactNode> = {
   shield: <path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z" />,
@@ -234,6 +242,48 @@ const paths: Record<IconName, React.ReactNode> = {
       <path d="M20 5v6h-6" />
     </>
   ),
+  home: (
+    <>
+      <path d="M4 10.5L12 4l8 6.5" />
+      <path d="M6 9v10.5h12V9" />
+      <path d="M10 19.5v-5h4v5" />
+    </>
+  ),
+  phone: (
+    <>
+      <rect x="7" y="3" width="10" height="18" rx="2.5" />
+      <path d="M11 18h2" />
+    </>
+  ),
+  menu: <path d="M4 7h16M4 12h16M4 17h16" />,
+  sidebar: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2.5" />
+      <path d="M9 4v16" />
+    </>
+  ),
+  book: (
+    <>
+      <path d="M5 4.5h10a2 2 0 012 2V20H7a2 2 0 01-2-2V4.5z" />
+      <path d="M5 18a2 2 0 012-2h10" />
+      <path d="M9 8.5h4" />
+    </>
+  ),
+  auto: (
+    <>
+      <path d="M20 11.5A8 8 0 005.6 7" />
+      <path d="M5 3.5v4h4" />
+      <path d="M4 12.5A8 8 0 0018.4 17" />
+      <path d="M19 20.5v-4h-4" />
+    </>
+  ),
+  flag: (
+    <>
+      <path d="M12 6v7" />
+      <path d="M12 17.5v.5" />
+    </>
+  ),
+  activity: <path d="M3 12h4l2.5-6 5 12 2.5-6h4" />,
 };
 
 export function Icon({

@@ -6,9 +6,8 @@ import { mergeInsights, parseCtLog, type LogInsights } from "@/lib/device/ctlog"
 import type { LoggingState, LogScenarios } from "@/lib/device/types";
 import { ctTags, detectOem, liftLogging, readyScreen } from "@/lib/device/oem";
 import { parseProps } from "@/lib/device/runner";
-import { Button } from "@/components/ui";
+import { Button, Card, Notice, StatusMark } from "@/components/ui";
 import { cx } from "@/lib/format";
-import { Icon } from "@/components/Icon";
 
 // Guided checks driven by the CleverTap SDK's own verbose logs: the user does
 // something in the app, we read logcat over ADB and tick the item.
@@ -300,25 +299,29 @@ export function LogSession({
   const cur = !active ? "" : (["a", "b", "c", "d", "e", "f"] as const).find((k) => ({ a: okA, b: okB, c: okC, d: okD, e: okE, f: okF })[k] !== true) ?? "";
 
   return (
-    <div className="space-y-3">
-      <p className="text-xs leading-relaxed text-muted">
-        Do each action below on the phone — we confirm it automatically and tick the checklist. Nothing personal is saved.
-      </p>
-
-      {!active ? (
-        <Button size="sm" icon="terminal" disabled={starting} onClick={start}>
-          {starting ? "Starting…" : ins ? "Start again" : "Start (restarts the app)"}
-        </Button>
-      ) : (
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="flex items-center gap-1.5 font-medium" style={{ color: "var(--pass)" }}>
-            <span className="h-2 w-2 animate-pulse rounded-full" style={{ background: "var(--pass)" }} /> Checking automatically
-          </span>
-          <Button size="sm" variant="ghost" onClick={stop}>
+    <div className="space-y-5">
+      <Card className="flex flex-wrap items-center gap-x-4 gap-y-3 p-5">
+        <div className="min-w-0 flex-1 basis-72">
+          {active ? (
+            <span role="status" className="flex items-center gap-2.5 text-[15px] font-bold" style={{ color: "var(--pass)" }}>
+              <span className="pulse-dot h-2.5 w-2.5 rounded-full" style={{ background: "var(--pass)" }} /> Watching the app — results tick themselves
+            </span>
+          ) : (
+            <span className="text-[15px] font-bold">Ready when you are</span>
+          )}
+          <p className="mt-0.5 text-sm text-muted">Do each action below on the phone. We confirm it from the SDK logs. Nothing personal is saved.</p>
+        </div>
+        {!active ? (
+          <Button icon="terminal" disabled={starting} onClick={start}>
+            {starting ? "Starting…" : ins ? "Start again" : "Start (restarts the app)"}
+          </Button>
+        ) : (
+          <Button variant="secondary" onClick={stop}>
             Stop
           </Button>
-        </div>
-      )}
+        )}
+      </Card>
+
       {logging?.status === "blocked" && (
         <Hint tone="fail" title="This phone needs one setting changed">
           {logging.fix}
@@ -337,124 +340,137 @@ export function LogSession({
           React Native <code className="font-mono">3</code>), install it, then press Start again.
         </Hint>
       )}
-      {err && <p className="text-xs" style={{ color: "var(--fail)" }}>{err}</p>}
-
-      {(active || ins) && (
-        <div className="grid gap-2 md:grid-cols-2">
-          <Step
-            n="a"
-            current={cur === "a"}
-            title="App start"
-            how="Automatic — we open the app for you."
-            ok={okA}
-            rows={
-              ins
-                ? [
-                    ["App opened (App Launched)", yes(ins.appLaunchedFired)],
-                    ["Data reaching CleverTap", ins.queueSent ? "yes" : ins.queueFailed ? "failed" : "not yet"],
-                    ["Ready for push", yes(ins.pushToken)],
-                    ["Location", yes(ins.locationSent)],
-                  ]
-                : []
-            }
-          />
-          <Step
-            n="b"
-            current={cur === "b"}
-            title="Log in"
-            how="In the app: log out, then log in again with your test user."
-            ok={okB}
-            rows={[
-              ["User identified", logins.some((l) => l.kind !== "aborted" && l.kind !== "failed") ? "yes" : logins.length ? "failed" : "not yet"],
-              ...(identified.at(-1)
-                ? ([
-                    ["Sent", ["Identity", "Email", "Phone", "Name"].filter((k) => identified.at(-1)!.keys.includes(k)).join(", ")],
-                    ["Phone format", identified.at(-1)!.phoneValid === undefined ? "no phone" : identified.at(-1)!.phoneValid ? "valid (+country code)" : "missing + / country code"],
-                  ] as [string, string][])
-                : []),
-            ]}
-          />
-          <Step
-            n="c"
-            current={cur === "c"}
-            title="Reopen while logged in (app update)"
-            how="Stay logged in. We restart the app and check you're still identified (like after an app update)."
-            ok={okC}
-            rows={sc.relaunch ? [["Result", sc.relaunch.onUserLoginOnStart ? "identified on start ✓" : "not identified on start"]] : []}
-            action={
-              <Button size="sm" variant="secondary" icon="refresh" disabled={!active || !!waiting} onClick={relaunch}>
-                {waiting === "relaunch" ? "Watching (15 s)…" : "Restart the app for me"}
-              </Button>
-            }
-          />
-          <Step
-            n="d"
-            current={cur === "d"}
-            title="Your key actions"
-            how="Use the app like a customer: open a product, add to cart, buy… Each action appears here."
-            ok={okD}
-            rows={customEvents.slice(0, 8).map((e) => [e.name, e.issues.length ? `⚠ ${e.issues[0]}` : "✓"])}
-          />
-          <Step
-            n="e"
-            current={cur === "e"}
-            title="Tap a push with a link"
-            how="We send a push with this link. Tap it on the phone — we check where it opens."
-            ok={okE}
-            rows={
-              sc.linkTap
-                ? [
-                    ["Link", sc.linkTap.url],
-                    ["Opened", sc.linkTap.landed ? `${sc.linkTap.landed}${sc.linkTap.openedOutsideApp ? " (outside the app)" : ""}` : "unknown"],
-                  ]
-                : waiting === "tap"
-                  ? [["Waiting", "Tap the notification on the phone…"]]
-                  : []
-            }
-            action={
-              <div className="flex w-full flex-wrap gap-2">
-                <input value={url} onChange={(e) => setUrl(e.target.value)} className="input min-w-0 flex-1 font-mono text-xs" placeholder="https://… or myapp://screen" />
-                <Button size="sm" variant="secondary" icon="bell" disabled={!active || !!waiting || !!canSendPush || !url.trim()} onClick={sendLink}>
-                  Send push
-                </Button>
-                {canSendPush && <span className="w-full text-[11px] text-muted">{canSendPush}</span>}
-              </div>
-            }
-          />
-          <Step
-            n="f"
-            current={cur === "f"}
-            title="See an in-app"
-            how="On the CleverTap dashboard, create a test in-app for your test user (trigger: App Launched). Then press Restart."
-            ok={okF}
-            rows={[
-              ["In-apps shown", String(ins?.inApp?.shown ?? 0)],
-              ...((ins?.inApp?.errors ?? []).map((e) => ["Problem", e]) as [string, string][]),
-              ...(ins?.inApp?.blockedOnExcludedScreen ? ([["Excluded screen", "respected ✓"]] as [string, string][]) : []),
-            ]}
-            action={
-              <Button size="sm" variant="secondary" icon="refresh" disabled={!active || !!waiting} onClick={restartOnly}>
-                {waiting === "relaunch" ? "Restarting…" : "Restart the app"}
-              </Button>
-            }
-          />
-          {ins?.push && (ins.push.received > 0 || ins.push.errors.length > 0) && (
-            <Step
-              n="✓"
-              title="Pushes on this phone (automatic)"
-              how="Filled in by itself whenever a push arrives."
-              ok={ins.push.errors.length || ins.push.fallbackChannel ? false : ins.push.rendered > 0 ? true : undefined}
-              rows={[
-                ["Received", String(ins.push.received)],
-                ["Shown", String(ins.push.rendered)],
-                ["Channel", ins.push.fallbackChannel ? "app's channel missing (default used)" : ins.push.channels.join(", ") || "—"],
-                ["Views recorded", String(ins.push.impressions)],
-                ...(ins.push.errors.map((e) => ["Problem", e]) as [string, string][]),
-              ]}
-            />
-          )}
-        </div>
+      {err && (
+        <p className="text-sm" style={{ color: "var(--fail-text)" }}>
+          {err}
+        </p>
       )}
+
+      <Card className="overflow-hidden">
+        <Step
+          first
+          n="1"
+          current={cur === "a"}
+          title="App start"
+          how="Automatic — we open the app for you."
+          ok={okA}
+          rows={
+            ins
+              ? [
+                  ["App opened (App Launched)", yes(ins.appLaunchedFired)],
+                  ["Data reaching CleverTap", ins.queueSent ? "yes" : ins.queueFailed ? "failed" : "not yet"],
+                  ["Ready for push", yes(ins.pushToken)],
+                  ["Location", yes(ins.locationSent)],
+                ]
+              : []
+          }
+        />
+        <Step
+          n="2"
+          current={cur === "b"}
+          title="Log in"
+          how="In the app: log out, then log in again with your test user."
+          ok={okB}
+          rows={
+            ins || logins.length
+              ? [
+                  ["User identified", logins.some((l) => l.kind !== "aborted" && l.kind !== "failed") ? "yes" : logins.length ? "failed" : "not yet"],
+                  ...(identified.at(-1)
+                    ? ([
+                        ["Sent", ["Identity", "Email", "Phone", "Name"].filter((k) => identified.at(-1)!.keys.includes(k)).join(", ")],
+                        ["Phone format", identified.at(-1)!.phoneValid === undefined ? "no phone" : identified.at(-1)!.phoneValid ? "valid (+country code)" : "missing + / country code"],
+                      ] as [string, string][])
+                    : []),
+                ]
+              : []
+          }
+        />
+        <Step
+          n="3"
+          current={cur === "c"}
+          title="Reopen while logged in (app update)"
+          how="Stay logged in. We restart the app and check you're still identified, like after an app update."
+          ok={okC}
+          rows={sc.relaunch ? [["Result", sc.relaunch.onUserLoginOnStart ? "identified on start ✓" : "not identified on start"]] : []}
+          action={
+            <Button size="sm" variant="secondary" icon="refresh" disabled={!active || !!waiting} onClick={relaunch}>
+              {waiting === "relaunch" ? "Watching (15 s)…" : "Restart the app for me"}
+            </Button>
+          }
+        />
+        <Step
+          n="4"
+          current={cur === "d"}
+          title="Your key actions"
+          how="Use the app like a customer: open a product, add to cart, buy… Each action appears here."
+          ok={okD}
+          rows={customEvents.slice(0, 8).map((e) => [e.name, e.issues.length ? `⚠ ${e.issues[0]}` : "✓"])}
+        />
+        <Step
+          n="5"
+          current={cur === "e"}
+          title="Tap a push with a link"
+          how="We send a push with this link. Tap it on the phone — we check where it opens."
+          ok={okE}
+          rows={
+            sc.linkTap
+              ? [
+                  ["Link", sc.linkTap.url],
+                  ["Opened", sc.linkTap.landed ? `${sc.linkTap.landed}${sc.linkTap.openedOutsideApp ? " (outside the app)" : ""}` : "unknown"],
+                ]
+              : waiting === "tap"
+                ? [["Waiting", "Tap the notification on the phone…"]]
+                : []
+          }
+          action={
+            <div className="flex w-full flex-wrap gap-2">
+              <input
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                className="input min-w-0 flex-1 basis-64 font-mono"
+                placeholder="https://… or myapp://screen"
+                aria-label="Link to send in the push"
+              />
+              <Button variant="secondary" icon="bell" disabled={!active || !!waiting || !!canSendPush || !url.trim()} onClick={sendLink}>
+                Send push
+              </Button>
+              {canSendPush && <span className="w-full text-sm text-muted">{canSendPush}</span>}
+            </div>
+          }
+        />
+        <Step
+          n="6"
+          current={cur === "f"}
+          title="See an in-app"
+          how="On the CleverTap dashboard, create a test in-app for your test user (trigger: App Launched). Then press Restart."
+          ok={okF}
+          rows={[
+            ["In-apps shown", String(ins?.inApp?.shown ?? 0)],
+            ...((ins?.inApp?.errors ?? []).map((e) => ["Problem", e]) as [string, string][]),
+            ...(ins?.inApp?.blockedOnExcludedScreen ? ([["Excluded screen", "respected ✓"]] as [string, string][]) : []),
+          ]}
+          action={
+            <Button size="sm" variant="secondary" icon="refresh" disabled={!active || !!waiting} onClick={restartOnly}>
+              {waiting === "relaunch" ? "Restarting…" : "Restart the app"}
+            </Button>
+          }
+        />
+        {ins?.push && (ins.push.received > 0 || ins.push.errors.length > 0) && (
+          <Step
+            n="✓"
+            title="Pushes on this phone"
+            how="Filled in by itself whenever a push arrives."
+            ok={ins.push.errors.length || ins.push.fallbackChannel ? false : ins.push.rendered > 0 ? true : undefined}
+            rows={[
+              ["Received", String(ins.push.received)],
+              ["Shown", String(ins.push.rendered)],
+              ["Channel", ins.push.fallbackChannel ? "app's channel missing (default used)" : ins.push.channels.join(", ") || "—"],
+              ["Views recorded", String(ins.push.impressions)],
+              ...(ins.push.errors.map((e) => ["Problem", e]) as [string, string][]),
+            ]}
+          />
+        )}
+      </Card>
     </div>
   );
 }
@@ -469,64 +485,68 @@ function Step({
   rows,
   action,
   current,
+  first,
 }: {
   n: string;
   title: string;
   how: string;
   ok?: boolean;
   current?: boolean;
+  first?: boolean;
   rows: [string, string][];
   action?: React.ReactNode;
 }) {
   return (
-    <div
-      className={cx("rounded-xl border p-3 transition", current && "ring-2 ring-[var(--accent)]")}
-      style={current ? { background: "var(--accent-soft)" } : ok === true ? { opacity: 0.75 } : undefined}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-semibold">
-          <span className="mr-1.5 text-muted">{n}.</span>
-          {title}
+    <div className={cx("flex gap-4 px-6 py-5 transition-colors", !first && "border-t")} style={current ? { background: "var(--brand-soft)" } : undefined}>
+      {ok === true ? (
+        <StatusMark status="pass" />
+      ) : ok === false ? (
+        <StatusMark status="warn" />
+      ) : current ? (
+        <StatusMark status="manual" />
+      ) : (
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-[1.5px] border-[var(--border-strong)] text-[13px] font-bold text-muted-2">
+          {n}
+        </span>
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-[17px] font-bold">{title}</span>
           {current && (
-            <span className="ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase text-white" style={{ background: "var(--accent)" }}>
-              Do this now
+            <span className="rounded-full px-2.5 py-0.5 text-xs font-bold" style={{ background: "var(--brand)", color: "var(--brand-fg)" }}>
+              Your turn
             </span>
           )}
-        </span>
-        {ok === true ? (
-          <Icon name="check" size={16} style={{ color: "var(--pass)" }} />
-        ) : ok === false ? (
-          <Icon name="alert" size={16} style={{ color: "var(--warn)" }} />
-        ) : (
-          <Icon name="clock" size={15} className="text-muted" />
+          {ok === true && (
+            <span className="text-sm font-bold" style={{ color: "var(--pass)" }}>
+              Done
+            </span>
+          )}
+        </div>
+        <p className="mt-1 text-[15px] text-text-2">{how}</p>
+        {rows.length > 0 && (
+          <dl className="mt-3 max-w-xl divide-y rounded-xl border bg-surface">
+            {rows.map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-4 px-3.5 py-2 text-sm">
+                <dt className="shrink-0 text-muted">{k}</dt>
+                <dd className="truncate text-right font-semibold" title={v}>
+                  {v}
+                </dd>
+              </div>
+            ))}
+          </dl>
         )}
+        {action && <div className="mt-3">{action}</div>}
       </div>
-      <p className="mt-0.5 text-[11px] text-muted">{how}</p>
-      {rows.length > 0 && (
-        <dl className="mt-2 space-y-0.5 text-[11.5px]">
-          {rows.map(([k, v]) => (
-            <div key={k} className="flex justify-between gap-3">
-              <dt className="shrink-0 text-muted">{k}</dt>
-              <dd className="truncate text-right font-medium" title={v}>
-                {v}
-              </dd>
-            </div>
-          ))}
-        </dl>
-      )}
-      {action && <div className="mt-2">{action}</div>}
     </div>
   );
 }
 
 function Hint({ title, children, tone }: { title: string; children: ReactNode; tone?: "fail" }) {
   return (
-    <div
-      className="rounded-lg px-3 py-2 text-xs"
-      style={{ background: tone === "fail" ? "var(--fail-soft)" : "var(--manual-soft)" }}
-    >
-      <b style={{ color: tone === "fail" ? "var(--fail)" : undefined }}>{title}.</b> {children}
-    </div>
+    <Notice tone={tone === "fail" ? "fail" : "info"} title={title}>
+      {children}
+    </Notice>
   );
 }
 

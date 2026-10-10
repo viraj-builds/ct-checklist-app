@@ -39,7 +39,7 @@ export function CriticalEvents({ audit }: { audit: Audit }) {
     setMsg("");
     try {
       await api(`/api/audits/${audit.id}`, { method: "PATCH", body: JSON.stringify({ criticalEvents: list }) });
-      setMsg("Saved. Trigger these events on the phone in Live device testing → step 4.");
+      setMsg("Saved. Now do these actions on the phone under “Your key actions”.");
     } catch (e) {
       setMsg((e as Error).message);
     } finally {
@@ -52,67 +52,75 @@ export function CriticalEvents({ audit }: { audit: Audit }) {
     const live = audit.device?.logs?.events.find((e) => e.name === name);
     const fromApi = audit.api?.events[name];
     if (live?.issues.length || Object.values(fromApi?.props ?? {}).some((p) => p.numericStrings || p.dateLikeStrings || p.types.nullish))
-      return { t: "property issues", c: "var(--fail)" };
+      return { t: "property issues", c: "var(--fail-text)" };
     if (live) return { t: `seen live ×${live.count}`, c: "var(--pass)" };
     if (fromApi && fromApi.androidSampled > 0) return { t: `${fromApi.capped ? "≥" : ""}${fromApi.androidSampled} in 30 days`, c: "var(--pass)" };
-    if (fromApi) return { t: "no data in 30 days", c: "var(--fail)" };
-    return { t: "not checked yet", c: "var(--na)" };
+    if (fromApi) return { t: "no data in 30 days", c: "var(--fail-text)" };
+    return { t: "not checked yet", c: "var(--muted-2)" };
   };
 
   return (
-    <Card className="p-5">
-      <div className="flex items-center gap-2">
-        <Icon name="zap" size={17} className="text-brand" />
-        <h2 className="font-semibold">Custom events to verify</h2>
-      </div>
-      <p className="mt-1 text-sm text-muted">
-        The 3–4 custom events that matter most in your app (e.g. <i>Product Viewed</i>, <i>Added To Cart</i>). Trigger them on the phone in
-        Live device testing → step 4 — we check each one fires with the right property types. Names must match exactly.
+    <Card className="p-6">
+      <h3 className="text-lg font-bold">Your key events</h3>
+      <p className="mt-1 max-w-[66ch] text-[15px] text-text-2">
+        Pick the 3–4 custom events that matter most, such as <i>Product Viewed</i> or <i>Added To Cart</i>. Then do those actions on the phone under
+        “Your key actions” below — we check each one arrives with the right property types. Names must match your code exactly.
       </p>
 
-      <div className="mt-3 flex flex-wrap gap-1.5">
+      <div className="mt-4 flex flex-wrap gap-2">
         {list.map((n) => {
           const st = statusOf(n);
           return (
-            <span key={n} className="inline-flex items-center gap-1.5 rounded-full border bg-surface-2 px-2.5 py-1 text-xs">
-              <b>{n}</b>
-              <span style={{ color: st.c }}>· {st.t}</span>
-              <button onClick={() => setList(list.filter((x) => x !== n))} aria-label={`Remove ${n}`} className="text-muted hover:text-text">
-                <Icon name="x" size={12} />
+            <span key={n} className="inline-flex min-h-10 items-center gap-2 rounded-full border-[1.5px] border-brand bg-brand-soft py-1 pl-3.5 pr-2 text-sm">
+              <b className="font-mono font-medium text-brand-text">{n}</b>
+              <span className="font-semibold" style={{ color: st.c }}>
+                · {st.t}
+              </span>
+              <button
+                onClick={() => setList(list.filter((x) => x !== n))}
+                aria-label={`Remove ${n}`}
+                className="flex h-7 w-7 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-text"
+              >
+                <Icon name="x" size={14} />
               </button>
             </span>
           );
         })}
-        {list.length === 0 && <span className="text-xs text-muted">None yet.</span>}
+        {list.length === 0 && <span className="text-sm text-muted">No key events chosen yet.</span>}
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-4 flex flex-wrap gap-2">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && add(input)}
           className="input max-w-xs"
-          placeholder="Type an event name and press Enter"
+          placeholder="Type an event name, press Enter"
+          aria-label="Event name"
         />
-        <Button size="sm" variant="secondary" icon="plus" disabled={!input.trim() || list.length >= 10} onClick={() => add(input)}>
+        <Button variant="secondary" icon="plus" disabled={!input.trim() || list.length >= 10} onClick={() => add(input)}>
           Add
         </Button>
-        <Button size="sm" icon="check" disabled={!dirty || busy} onClick={save}>
-          {busy ? "Saving…" : "Save"}
+        <Button icon="check" disabled={!dirty || busy} onClick={save}>
+          {busy ? "Saving…" : "Save events"}
         </Button>
       </div>
 
       {suggestions.length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
-          <span className="text-muted">Seen in this app:</span>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span className="text-sm text-muted">Seen in this app:</span>
           {suggestions.map((n) => (
-            <button key={n} onClick={() => add(n)} className="rounded-full border px-2 py-0.5 text-muted transition hover:bg-surface-2 hover:text-text">
-              + {n}
+            <button
+              key={n}
+              onClick={() => add(n)}
+              className="inline-flex min-h-9 items-center gap-1 rounded-full border border-[var(--border-strong)] px-3 font-mono text-[13px] text-text-2 transition hover:border-brand hover:bg-brand-soft"
+            >
+              <Icon name="plus" size={13} /> {n}
             </button>
           ))}
         </div>
       )}
-      {msg && <p className="mt-2 text-xs text-muted">{msg}</p>}
+      {msg && <p className="mt-3 text-sm font-semibold text-text-2">{msg}</p>}
     </Card>
   );
 }

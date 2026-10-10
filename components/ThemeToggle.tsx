@@ -26,9 +26,10 @@ export function ThemeToggle() {
     <button
       onClick={toggle}
       aria-label="Toggle theme"
-      className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition hover:bg-surface-2 hover:text-text"
+      title={dark ? "Switch to light mode" : "Switch to dark mode"}
+      className="flex h-11 w-11 items-center justify-center rounded-xl text-muted transition hover:bg-surface-2 hover:text-text"
     >
-      <Icon name={dark ? "sun" : "moon"} size={18} />
+      <Icon name={dark ? "sun" : "moon"} size={20} />
     </button>
   );
 }

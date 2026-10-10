@@ -4,16 +4,16 @@ export const STATUS_META: Record<
   ItemStatus,
   { label: string; token: string; soft: string; dot: string }
 > = {
-  pass: { label: "Pass", token: "var(--pass)", soft: "var(--pass-soft)", dot: "●" },
-  fail: { label: "Fail", token: "var(--fail)", soft: "var(--fail-soft)", dot: "●" },
-  warn: { label: "Warning", token: "var(--warn)", soft: "var(--warn-soft)", dot: "●" },
+  pass: { label: "Passed", token: "var(--pass)", soft: "var(--pass-soft)", dot: "●" },
+  fail: { label: "Needs fix", token: "var(--fail)", soft: "var(--fail-soft)", dot: "●" },
+  warn: { label: "Check this", token: "var(--warn)", soft: "var(--warn-soft)", dot: "●" },
   manual: {
-    label: "Manual check",
+    label: "To check",
     token: "var(--manual)",
     soft: "var(--manual-soft)",
     dot: "◐",
   },
-  na: { label: "N/A", token: "var(--na)", soft: "var(--na-soft)", dot: "○" },
+  na: { label: "Not needed", token: "var(--na)", soft: "var(--na-soft)", dot: "○" },
 };
 
 export const METHOD_META: Record<
@@ -22,27 +22,27 @@ export const METHOD_META: Record<
 > = {
   "auto-static": {
     label: "Auto · Static",
-    short: "Static",
+    short: "Automatic",
     desc: "Detected from the binary, source, or live page.",
   },
   "auto-api": {
     label: "Auto · API (read)",
-    short: "API",
+    short: "Automatic",
     desc: "Verified by reading data from the CleverTap account.",
   },
   "auto-trigger": {
     label: "Auto · Trigger + Confirm",
-    short: "Trigger",
+    short: "Automatic",
     desc: "API triggers the action, then confirms via the result event.",
   },
   hybrid: {
     label: "Hybrid",
-    short: "Hybrid",
+    short: "On your phone",
     desc: "Partly automated; a human confirms the visual/UI outcome.",
   },
   manual: {
     label: "Manual",
-    short: "Manual",
+    short: "You confirm",
     desc: "Visual or device-state check — no account signal exists.",
   },
 };
@@ -125,9 +125,9 @@ export const LIVE_GUIDE: Record<
   android: {
     verbose: "CleverTapAPI.setDebugLevel(CleverTapAPI.LogLevel.VERBOSE);",
     steps: [
-      "In “Live device testing” above, run the push tests (step 3) and the guided checks (step 4) — most items tick themselves.",
-      "Install a test build with CleverTap debug mode on (line below) so we can confirm each action.",
-      "For anything left, check it yourself and press Verified or Not working.",
+      "Run the Push tests and Guided checks stages with your phone connected — most items tick themselves.",
+      "Install a test build with CleverTap debug mode on (the line below) so we can confirm each action.",
+      "For anything left, check it yourself and choose It works or Not working.",
     ],
     helpVideo:
       "https://www.youtube.com/results?search_query=how+to+enable+usb+debugging+android",
@@ -163,34 +163,34 @@ export const DOCS_HELP = "https://developer.clevertap.com/docs/getting-started";
 // How each item that isn't decided by the scan/API gets checked. `auto` = it
 // ticks itself once that step has run on a connected phone.
 export const HOW_TO_CHECK: Record<string, { auto: boolean; how: string }> = {
-  "app-t3-test-push": { auto: true, how: "Live device testing → step 3 → press Test on any state. We send a push and spot it on the phone." },
-  "app-t3-foreground": { auto: true, how: "Live device testing → step 3 → Test on Foreground. We open the app, send a push and look for it." },
-  "app-t3-background": { auto: true, how: "Live device testing → step 3 → Test on Background. We open the app, press Home, then send a push." },
+  "app-t3-test-push": { auto: true, how: "In Push tests, press Test on any app state. We send a push and spot it on the phone." },
+  "app-t3-foreground": { auto: true, how: "In Push tests, press Test on App open. We open the app, send a push and look for it." },
+  "app-t3-background": { auto: true, how: "In Push tests, press Test on In the background. We open the app, press Home, then send a push." },
   "app-t3-killed": {
     auto: true,
-    how: "Live device testing → step 3 → Test on Killed. We close the app the way swiping it away does, then send a push. Works over USB and Wi-Fi.",
+    how: "In Push tests, press Test on App closed. We close the app the way swiping it away does, then send a push. Works over USB and Wi-Fi.",
   },
   "app-t1-onuserlogin-update": {
     auto: true,
-    how: "Live device testing → step 4 → b. “Restart the app”. Stay logged in; we restart the app and check onUserLogin runs on start (what happens after an update).",
+    how: "In Guided checks, use “Reopen while logged in”. Stay logged in; we restart the app and check onUserLogin runs on start (what happens after an update).",
   },
   "app-t3-deeplink-internal": {
     auto: true,
-    how: "Live device testing → step 4 → push with a link: enter your app link (e.g. myapp://product/1), Send, tap the push on the phone. We see which screen opens.",
+    how: "In Guided checks, use “Tap a push with a link”: enter your app link (e.g. myapp://product/1), send it and tap the push on the phone. We see which screen opens.",
   },
   "app-t3-deeplink-external": {
     auto: true,
-    how: "Live device testing → step 4 → push with a link: enter an https link, Send, tap the push. We see whether it opens in the browser or the app.",
+    how: "In Guided checks, use “Tap a push with a link”: enter an https link, send it and tap the push. We see whether it opens in the browser or the app.",
   },
   "app-t3-test-inapp": {
     auto: true,
-    how: "Create one in-app campaign on the dashboard triggered by an event (e.g. App Launched), then step 4 → f. “See an in-app”. We spot it in the SDK logs.",
+    how: "Create one in-app campaign on the dashboard triggered by an event (e.g. App Launched), then use “See an in-app” in Guided checks. We spot it in the SDK logs.",
   },
-  "app-t1-fcm-service": { auto: true, how: "Ticks itself when a test push (step 3) shows up in the SDK logs as received." },
-  "app-t1-sdk-version": { auto: true, how: "Step 4 reads the exact SDK version from the SDK's own logs, even when the build is minified." },
+  "app-t1-fcm-service": { auto: true, how: "Ticks itself when a test push from Push tests shows up in the SDK logs as received." },
+  "app-t1-sdk-version": { auto: true, how: "Guided checks read the exact SDK version from the SDK's own logs, even when the build is minified." },
   "app-t4-critical-events": {
     auto: true,
-    how: "Live device testing → step 4 “Your key actions”: do the actions that raise each listed event — we check it fires with the right property types.",
+    how: "In Guided checks, “Your key actions”: do the actions that raise each listed event — we check it fires with the right property types.",
   },
   "app-t3-uninstall": { auto: false, how: "Dashboard → Settings → Engage → Uninstall tracking ON. Ticks itself once an App Uninstalled event arrives." },
   "app-t3-session-analytics": { auto: false, how: "Dashboard → Settings → Session analytics ON. CleverTap has no API for this, so tick it after checking." },
@@ -248,8 +248,8 @@ export const ANDROID_NOTES: Record<string, { text: string; url: string }> = {
 
 // What each status means — shown as a legend on the report.
 export const STATUS_LEGEND: { status: "fail" | "warn" | "manual" | "na"; text: string }[] = [
-  { status: "fail", text: "Broken, or a CleverTap requirement is missing — users are affected. Fix in code/config." },
-  { status: "warn", text: "Works, but outdated or risky — or the problem is in account data or phone settings, not this build." },
-  { status: "manual", text: "Can't be decided automatically yet — run the step shown, or check the dashboard." },
+  { status: "fail", text: "Something is broken or missing, so users are affected. Fix it in the app code or settings." },
+  { status: "warn", text: "Works, but is outdated or risky — or the cause is account data or phone settings, not this build." },
+  { status: "manual", text: "We can't decide this on our own yet. Run the step shown, or check your dashboard." },
   { status: "na", text: "Doesn't apply to this app." },
 ];

@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Card, Button } from "@/components/ui";
+import { Card, Button, StatusMark } from "@/components/ui";
 import { Icon, type IconName } from "@/components/Icon";
 import { PLATFORM_META, REGIONS } from "@/lib/meta";
 import type { Platform } from "@/lib/types";
 import { itemsForPlatform } from "@/lib/checklist";
+import { GROUPS } from "@/lib/stages";
 import { api } from "@/lib/store";
 import { scanInBrowser } from "@/lib/analyzer/android/client";
 import { uploadToSignedUrl } from "@/lib/upload";
@@ -15,6 +16,11 @@ import { cx, formatBytes } from "@/lib/format";
 
 const PLATFORMS: Platform[] = ["android", "ios", "web"];
 const AVAILABLE: Record<Platform, boolean> = { android: true, ios: false, web: false };
+const PLATFORM_NEEDS: Record<Platform, string> = {
+  android: "Your APK or AAB, plus a test phone",
+  ios: "Your IPA, plus a test iPhone",
+  web: "Your website URL",
+};
 type ScanWhere = "browser" | "upload";
 
 interface RunState {
@@ -28,7 +34,7 @@ interface RunState {
 export default function NewAuditPage() {
   const router = useRouter();
   const [step, setStep] = useState(0);
-  const [platform, setPlatform] = useState<Platform | null>(null);
+  const [platform, setPlatform] = useState<Platform | null>("android");
 
   const [name, setName] = useState("");
   const [region, setRegion] = useState("in1");
@@ -49,14 +55,11 @@ export default function NewAuditPage() {
     .filter(Boolean)
     .slice(0, 10);
 
-  function detailsValid() {
+  function projectValid() {
     if (!name.trim()) return false;
     if (accountId.trim().length < 3) return false;
-    if (!skipApi && passcode.length < 3) return false;
-    return !!file;
+    return skipApi || passcode.length >= 3;
   }
-
-  const canContinue = step === 0 ? !!platform && AVAILABLE[platform] : step === 1 ? detailsValid() : true;
 
   async function start() {
     if (!platform || !file) return;
@@ -106,83 +109,95 @@ export default function NewAuditPage() {
   }
 
   const itemCount = platform ? itemsForPlatform(platform).length : 0;
+  const busy = !!run && !run.error;
+  const regionLabel = REGIONS.find((r) => r.id === region)?.label ?? region;
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold tracking-tight">New audit</h1>
-        <p className="mt-1 text-sm text-muted">
-          Scan the {platform ? PLATFORM_META[platform].targetLabel : "build"} and verify the account in one pass.
-          Anything that needs a real device shows up as a short checklist at the end.
+    <div>
+      <div className="mb-8 max-w-2xl">
+        <h1 className="text-4xl font-bold tracking-[-0.02em]">Check your CleverTap integration</h1>
+        <p className="mt-3 text-lg text-muted">
+          Three short steps to set up. Then we guide you through each test, read the data for you and point out anything to fix.
         </p>
       </div>
 
-      <Stepper step={step} labels={["Platform", "Credentials & source", "Review"]} />
-
-      <Card className="mt-6 p-6">
-        {/* STEP 0: platform */}
-        {step === 0 && (
-          <div className="animate-fade-in">
-            <StepHeading title="What are you auditing?" sub="Pick the platform." />
-            <div className="grid gap-3 sm:grid-cols-3">
-              {PLATFORMS.map((p) => (
-                <ChoiceCard
-                  key={p}
-                  selected={platform === p}
-                  disabled={!AVAILABLE[p]}
-                  onClick={() => AVAILABLE[p] && setPlatform(p)}
-                  icon={PLATFORM_META[p].icon as IconName}
-                  title={PLATFORM_META[p].label}
-                  desc={AVAILABLE[p] ? "Native, Flutter, React Native, Cordova, Unity…" : "Coming soon"}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* STEP 1: details */}
-        {step === 1 && platform && (
-          <div className="animate-fade-in space-y-5">
-            <StepHeading title="Credentials & source" sub={`${itemCount} checklist items will be evaluated.`} />
-            <Field label="Audit name">
-              <input
-                autoFocus
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder={`e.g. ShopMate — ${PLATFORM_META[platform].label}`}
-                className="input"
-              />
-            </Field>
-
-            {/* Credentials */}
-            <div className="rounded-xl border bg-surface-2 p-4">
-              <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
-                <Icon name="key" size={16} className="text-accent" />
-                CleverTap account
+      <div className="flex flex-wrap items-start gap-10">
+        <section aria-label="Set up your audit" className="min-w-0 flex-[999_1_560px]">
+          <Card className="overflow-hidden">
+            {/* STEP 1: platform */}
+            <StepBlock
+              n={1}
+              state={step === 0 ? "current" : "done"}
+              title="Choose what to audit"
+              done={platform ? `${PLATFORM_META[platform].label} app · ${itemCount} checks` : ""}
+              onChange={busy ? undefined : () => setStep(0)}
+            >
+              <div role="group" aria-label="Platform" className="grid gap-3 sm:grid-cols-3">
+                {PLATFORMS.map((p) => (
+                  <ChoiceCard
+                    key={p}
+                    selected={platform === p}
+                    disabled={!AVAILABLE[p]}
+                    onClick={() => AVAILABLE[p] && setPlatform(p)}
+                    icon={PLATFORM_META[p].icon as IconName}
+                    title={`${PLATFORM_META[p].label} app`.replace("Web app", "Website")}
+                    desc={PLATFORM_NEEDS[p]}
+                    foot={AVAILABLE[p] ? `${itemsForPlatform(p).length} checks · any framework` : "Coming soon"}
+                  />
+                ))}
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Region">
-                  <select value={region} onChange={(e) => setRegion(e.target.value)} className="input">
-                    {REGIONS.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.label}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Account ID">
+              <div className="mt-6">
+                <Button size="lg" disabled={!platform || !AVAILABLE[platform]} onClick={() => setStep(1)}>
+                  Continue
+                </Button>
+              </div>
+            </StepBlock>
+
+            {/* STEP 2: CleverTap project */}
+            <StepBlock
+              n={2}
+              state={step === 1 ? "current" : step > 1 ? "done" : "upcoming"}
+              title="Connect your CleverTap project"
+              hint="Your Account ID and passcode, so we can read your data"
+              done={`${name.trim()} · ${regionLabel} · ${accountId.trim()}${skipApi ? " · build checks only" : ""}`}
+              onChange={busy ? undefined : () => setStep(1)}
+            >
+              <p className="mb-5 text-[15px] text-muted">Find these in Settings › Project on your CleverTap dashboard.</p>
+              <div className="space-y-5">
+                <Field label="Name this audit" htmlFor="name">
                   <input
-                    value={accountId}
-                    onChange={(e) => setAccountId(e.target.value)}
-                    placeholder="W8R-K6R-XXXX"
-                    className="input font-mono"
+                    id="name"
+                    autoFocus
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder={platform ? `For example ShopMate — ${PLATFORM_META[platform].label}` : "For example ShopMate"}
+                    className="input"
                   />
                 </Field>
-              </div>
-              <div className="mt-4">
-                <Field label="Passcode">
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <Field label="Account ID" htmlFor="acc">
+                    <input
+                      id="acc"
+                      value={accountId}
+                      onChange={(e) => setAccountId(e.target.value)}
+                      placeholder="For example W8R-K6R-XXXX"
+                      className="input font-mono"
+                    />
+                  </Field>
+                  <Field label="Region" htmlFor="region">
+                    <select id="region" value={region} onChange={(e) => setRegion(e.target.value)} className="input">
+                      {REGIONS.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+                <Field label="Passcode" htmlFor="pass">
                   <div className="relative">
                     <input
+                      id="pass"
                       type={showPass ? "text" : "password"}
                       autoComplete="new-password"
                       data-1p-ignore
@@ -190,108 +205,111 @@ export default function NewAuditPage() {
                       value={passcode}
                       disabled={skipApi}
                       onChange={(e) => setPasscode(e.target.value)}
-                      placeholder={skipApi ? "Not needed for static-only checks" : "••••••••••••"}
-                      className="input pr-10 font-mono disabled:opacity-50"
+                      placeholder={skipApi ? "Not needed for build-only checks" : "Paste your passcode"}
+                      className="input pr-12 font-mono disabled:opacity-50"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPass((v) => !v)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-text"
-                      aria-label="Toggle passcode visibility"
+                      className="absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted hover:bg-surface-3 hover:text-text"
+                      aria-label={showPass ? "Hide passcode" : "Show passcode"}
                     >
-                      <Icon name={showPass ? "eyeOff" : "eye"} size={17} />
+                      <Icon name={showPass ? "eyeOff" : "eye"} size={18} />
                     </button>
                   </div>
                 </Field>
-                <label className="mt-2.5 flex cursor-pointer items-center gap-2 text-xs text-muted">
-                  <input type="checkbox" checked={skipApi} onChange={(e) => setSkipApi(e.target.checked)} />
-                  I don&apos;t have the passcode — run the build checks only (data-flow items become manual)
+                <label className="flex cursor-pointer items-start gap-3 text-[15px] text-text-2">
+                  <input type="checkbox" className="mt-1 h-4 w-4 accent-[var(--brand)]" checked={skipApi} onChange={(e) => setSkipApi(e.target.checked)} />
+                  <span>
+                    I don&apos;t have the passcode — only check the build.
+                    <span className="block text-sm text-muted">Checks that need your CleverTap data will be left for you to confirm.</span>
+                  </span>
                 </label>
+                <div className="flex items-start gap-3 rounded-xl bg-surface-2 px-4 py-3.5 text-sm text-muted">
+                  <Icon name="lock" size={17} className="mt-0.5 shrink-0" style={{ color: "var(--pass)" }} />
+                  <span>
+                    The passcode is only used for this run and is never stored. We only read from CleverTap — except the test push you send yourself
+                    later.
+                  </span>
+                </div>
               </div>
-            </div>
+              <div className="mt-6">
+                <Button size="lg" disabled={!projectValid()} onClick={() => setStep(2)}>
+                  Continue
+                </Button>
+              </div>
+            </StepBlock>
 
-            {/* Source */}
-            <Field label={`Upload ${PLATFORM_META[platform].targetLabel}`}>
-              <Dropzone accept={PLATFORM_META[platform].accept} file={file} onFile={setFile} hint=".apk · .aab · .apks · .xapk" />
-              <span className="mt-1.5 flex items-center gap-1.5 text-xs text-muted">
-                <Icon name="lock" size={12} className="text-[var(--pass)]" />
-                Checked right here in your browser — your app file isn&apos;t stored anywhere.
-              </span>
-              {platform === "android" && (
-                <span className="mt-1 block text-xs text-muted">
-                  Upload the normal build you ship (release). No special build needed. For the live phone tests later, install a build with
-                  CleverTap debug logs on.
+            {/* STEP 3: build */}
+            <StepBlock
+              n={3}
+              state={step === 2 ? "current" : "upcoming"}
+              title={`Add your ${platform ? PLATFORM_META[platform].targetLabel : "build"}`}
+              hint="We scan it right here in your browser"
+            >
+              <div className="space-y-6">
+                <div>
+                  <Dropzone accept={platform ? PLATFORM_META[platform].accept : ""} file={file} onFile={setFile} hint=".apk · .aab · .apks · .xapk" />
+                  <p className="mt-2.5 flex items-center gap-2 text-sm text-muted">
+                    <Icon name="lock" size={15} style={{ color: "var(--pass)" }} />
+                    Checked in your browser — your app file isn&apos;t uploaded or stored.
+                  </p>
+                  {platform === "android" && (
+                    <p className="mt-1.5 text-sm text-muted">
+                      Use the normal release build you ship. For the phone tests later, install a build with CleverTap debug logs on.
+                    </p>
+                  )}
+                </div>
+
+                <Field label="Your key events (optional)" htmlFor="events" hint="The 3–4 custom events that matter most, spelled exactly as in your code. You can change them later.">
+                  <input
+                    id="events"
+                    value={events}
+                    onChange={(e) => setEvents(e.target.value)}
+                    placeholder="For example Product Viewed, Added To Cart, Charged"
+                    className="input"
+                  />
+                </Field>
+
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+                  <Button size="lg" icon="zap" onClick={start} disabled={!file || !projectValid() || busy}>
+                    {busy ? "Starting…" : "Start audit"}
+                  </Button>
+                  <span className="text-sm text-muted">Takes about a minute. Your progress is saved as you go.</span>
+                </div>
+              </div>
+            </StepBlock>
+          </Card>
+        </section>
+
+        <aside aria-label="About the audit" className="min-w-0 flex-[1_1_280px] pt-1">
+          <h2 className="text-lg font-bold">What the audit covers</h2>
+          <ol className="mt-4 space-y-4">
+            {GROUPS.map((g, i) => (
+              <li key={g.id} className="flex items-start gap-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-[1.5px] border-[var(--border-strong)] text-[13px] font-bold text-muted">
+                  {i + 1}
                 </span>
-              )}
-            </Field>
-
-            <Field label="Custom events to verify (optional)">
-              <input
-                value={events}
-                onChange={(e) => setEvents(e.target.value)}
-                placeholder="e.g. Product Viewed, Added To Cart, Charged"
-                className="input"
-              />
-              <span className="mt-1 block text-xs text-muted">
-                The 3–4 custom events that matter most in your app, spelled exactly as in code. We check they fire with the right
-                property types. You can add or change them later on the report.
-              </span>
-            </Field>
-
-            <SecurityNote>
-              The passcode is sent only to our server for this run and is never stored. All CleverTap API calls are
-              read-only, except the optional test push you trigger yourself from the report.
-            </SecurityNote>
+                <span className="min-w-0">
+                  <span className="block font-bold">{g.name}</span>
+                  <span className="block text-sm text-muted">{g.desc}</span>
+                </span>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-6 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2.5 border-t pt-5">
+            <span className="col-span-2 font-bold">Every check shows who does the work</span>
+            <span className="inline-flex items-center gap-1.5 justify-self-start rounded-full bg-surface-3 py-0.5 pl-2 pr-2.5 text-xs font-bold text-text-2">
+              <Icon name="auto" size={14} /> Automatic
+            </span>
+            <span className="text-sm text-muted">We verify it from your build and data.</span>
+            <span className="inline-flex items-center gap-1.5 justify-self-start rounded-full bg-brand-soft py-0.5 pl-2 pr-2.5 text-xs font-bold text-brand-text">
+              <Icon name="phone" size={14} /> On your phone
+            </span>
+            <span className="text-sm text-muted">You do something first, then we verify it.</span>
           </div>
-        )}
-
-        {/* STEP 2: review */}
-        {step === 2 && platform && (
-          <div className="animate-fade-in">
-            <StepHeading title="Review & run" sub="Confirm the setup below." />
-            <div className="divide-y rounded-xl border">
-              <ReviewRow label="Name" value={name} />
-              <ReviewRow label="Platform" value={PLATFORM_META[platform].label} />
-              <ReviewRow label="Region" value={REGIONS.find((r) => r.id === region)?.label ?? region} />
-              <ReviewRow label="Account ID" value={accountId.trim()} mono />
-              <ReviewRow label="API checks" value={skipApi ? "Skipped (no passcode)" : "Enabled"} />
-              <ReviewRow label="Build" value={file ? `${file.name} · ${formatBytes(file.size)}` : ""} mono />
-              {criticalEvents.length > 0 && <ReviewRow label="Custom events" value={criticalEvents.join(", ")} />}
-              <ReviewRow label="Checklist items" value={String(itemCount)} />
-            </div>
-            <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-dashed p-3.5 text-xs leading-relaxed text-muted">
-              <Icon name="info" size={16} className="mt-0.5 shrink-0 text-accent" />
-              <span>
-                After the automated pass, items that need a real device (killed/background/foreground push, deep-link
-                landing, visual render) appear as a short guided <b className="text-text">Live-device checklist</b> on
-                the report. You can also send a test push from there.
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Nav */}
-        <div className="mt-7 flex items-center justify-between">
-          <Button
-            variant="ghost"
-            icon="chevronRight"
-            className="[&_svg]:rotate-180"
-            onClick={() => setStep((s) => Math.max(0, s - 1))}
-            disabled={step === 0 || !!run}
-          >
-            Back
-          </Button>
-          {step < 2 ? (
-            <Button iconRight="arrowRight" disabled={!canContinue} onClick={() => setStep((s) => s + 1)}>
-              Continue
-            </Button>
-          ) : (
-            <Button icon="zap" onClick={start} disabled={!!run && !run.error}>
-              {run && !run.error ? "Running…" : "Run full analysis"}
-            </Button>
-          )}
-        </div>
-      </Card>
+        </aside>
+      </div>
 
       {run && (
         <RunningOverlay
@@ -316,40 +334,52 @@ function runSteps(where: ScanWhere, withApi: boolean): string[] {
 
 /* ---------------- sub components ---------------- */
 
-function Stepper({ step, labels }: { step: number; labels: string[] }) {
+function StepBlock({
+  n,
+  state,
+  title,
+  hint,
+  done,
+  onChange,
+  children,
+}: {
+  n: number;
+  state: "done" | "current" | "upcoming";
+  title: string;
+  hint?: string;
+  done?: string;
+  onChange?: () => void;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="flex items-center">
-      {labels.map((l, i) => (
-        <div key={l} className="flex flex-1 items-center last:flex-none">
-          <div className="flex items-center gap-2">
-            <span
-              className={cx(
-                "flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold transition",
-                i < step
-                  ? "bg-brand text-brand-fg"
-                  : i === step
-                    ? "bg-brand-soft text-brand ring-2 ring-brand"
-                    : "bg-surface-2 text-muted",
-              )}
-            >
-              {i < step ? <Icon name="check" size={14} /> : i + 1}
-            </span>
-            <span className={cx("hidden text-sm font-medium sm:block", i <= step ? "text-text" : "text-muted")}>{l}</span>
-          </div>
-          {i < labels.length - 1 && (
-            <div className={cx("mx-2 h-px flex-1 transition", i < step ? "bg-brand" : "bg-border")} />
-          )}
+    <div className={cx(n > 1 && "border-t")}>
+      <div className="flex items-center gap-4 px-6 py-5">
+        {state === "done" ? (
+          <StatusMark status="pass" size={32} />
+        ) : (
+          <span
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-bold"
+            style={
+              state === "current"
+                ? { background: "var(--brand)", color: "var(--brand-fg)" }
+                : { border: "1.5px solid var(--border-strong)", color: "var(--muted-2)" }
+            }
+          >
+            {n}
+          </span>
+        )}
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <h2 className={cx("text-lg font-bold", state === "upcoming" && "text-text-2")}>{title}</h2>
+          {state === "done" && done && <span className="truncate text-sm text-muted">{done}</span>}
+          {state === "upcoming" && hint && <span className="text-sm text-muted">{hint}</span>}
         </div>
-      ))}
-    </div>
-  );
-}
-
-function StepHeading({ title, sub }: { title: string; sub?: string }) {
-  return (
-    <div className="mb-5">
-      <h2 className="text-lg font-semibold">{title}</h2>
-      {sub && <p className="mt-1 text-sm text-muted">{sub}</p>}
+        {state === "done" && onChange && (
+          <button type="button" onClick={onChange} className="link min-h-11 px-2.5 text-[15px]">
+            Change
+          </button>
+        )}
+      </div>
+      {state === "current" && <div className="animate-fade-in px-6 pb-7 sm:pl-[72px]">{children}</div>}
     </div>
   );
 }
@@ -361,6 +391,7 @@ function ChoiceCard({
   icon,
   title,
   desc,
+  foot,
 }: {
   selected: boolean;
   disabled?: boolean;
@@ -368,47 +399,44 @@ function ChoiceCard({
   icon: IconName;
   title: string;
   desc: string;
+  foot: string;
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={disabled}
+      aria-pressed={selected}
       className={cx(
-        "flex flex-col items-start gap-3 rounded-xl border p-4 text-left transition",
-        disabled && "cursor-not-allowed opacity-50",
-        selected ? "border-brand bg-brand-soft ring-1 ring-brand" : !disabled && "hover:border-border-strong hover:bg-surface-2",
+        "relative flex min-h-[176px] flex-col items-start gap-2 rounded-xl border-2 p-4.5 text-left transition-colors",
+        disabled && "cursor-not-allowed opacity-55",
+        selected ? "border-brand bg-brand-soft" : "border-[var(--border)] bg-surface",
+        !selected && !disabled && "hover:border-[var(--border-strong)]",
       )}
     >
-      <span
-        className={cx(
-          "flex h-11 w-11 items-center justify-center rounded-xl",
-          selected ? "bg-brand text-brand-fg" : "bg-surface-2 text-text",
-        )}
-      >
+      <span className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-surface-3 text-text">
         <Icon name={icon} size={22} />
       </span>
-      <div>
-        <div className="font-semibold">{title}</div>
-        <div className="text-xs text-muted">{desc}</div>
-      </div>
+      <span className="text-base font-bold">{title}</span>
+      <span className="text-sm text-muted">{desc}</span>
+      <span className="mt-auto text-[13px] text-muted-2">{foot}</span>
+      {selected && (
+        <span className="absolute right-3.5 top-3.5">
+          <StatusMark status="pass" size={22} />
+        </span>
+      )}
     </button>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, htmlFor, hint, children }: { label: string; htmlFor?: string; hint?: string; children: React.ReactNode }) {
   return (
-    <label className="block">
-      <span className="mb-1.5 block text-sm font-medium">{label}</span>
+    <div>
+      <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-bold">
+        {label}
+      </label>
       {children}
-    </label>
-  );
-}
-
-function SecurityNote({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex items-start gap-2.5 rounded-xl border border-dashed p-3.5 text-xs leading-relaxed text-muted">
-      <Icon name="lock" size={16} className="mt-0.5 shrink-0 text-[var(--pass)]" />
-      <span>{children}</span>
+      {hint && <span className="mt-1.5 block text-[13px] text-muted">{hint}</span>}
     </div>
   );
 }
@@ -439,24 +467,15 @@ function Dropzone({
         if (f) onFile(f);
       }}
       className={cx(
-        "flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-8 text-center transition hover:bg-surface-2",
-        (file || drag) && "border-brand bg-brand-soft",
+        "flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-10 text-center transition-colors hover:bg-surface-2",
+        file || drag ? "border-brand bg-brand-soft" : "border-[var(--border-strong)]",
       )}
     >
-      <input type="file" accept={accept} className="hidden" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
-      <Icon name={file ? "check" : "upload"} size={24} className={file ? "text-brand" : "text-muted"} />
-      <div className="mt-2 text-sm font-medium">{file ? file.name : "Click or drop a file"}</div>
-      <div className="mt-0.5 text-xs text-muted">{file ? formatBytes(file.size) : hint}</div>
+      <input type="file" accept={accept} className="sr-only" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
+      {file ? <StatusMark status="pass" size={36} /> : <Icon name="upload" size={28} className="text-muted" />}
+      <div className="mt-3 text-base font-bold">{file ? file.name : "Drop your build here, or click to choose"}</div>
+      <div className="mt-1 text-sm text-muted">{file ? `${formatBytes(file.size)} · click to choose another` : hint}</div>
     </label>
-  );
-}
-
-function ReviewRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
-      <span className="shrink-0 text-muted">{label}</span>
-      <span className={cx("truncate text-right font-medium", mono && "font-mono text-[13px]")}>{value || "—"}</span>
-    </div>
   );
 }
 
@@ -473,69 +492,54 @@ function RunningOverlay({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm animate-fade-in">
-      <Card className="w-full max-w-sm p-6">
-        <div className="text-center">
-          <div
-            className="mx-auto flex h-14 w-14 items-center justify-center rounded-full"
-            style={{ background: run.error ? "var(--fail-soft)" : "var(--brand-soft)" }}
-          >
-            {run.error ? (
-              <Icon name="alert" size={26} style={{ color: "var(--fail)" }} />
-            ) : (
-              <span className="h-8 w-8 rounded-full border-[3px] border-brand border-t-transparent animate-spin-slow" />
-            )}
-          </div>
-          <h3 className="mt-4 font-semibold">{run.error ? "Something went wrong" : "Running full analysis"}</h3>
-        </div>
-        <div className="mt-4 space-y-2 text-left">
+      <Card className="w-full max-w-md p-7 shadow-[var(--shadow-lg)]">
+        <h3 className="text-xl font-bold">{run.error ? "Something went wrong" : "Setting up your audit"}</h3>
+        <p className="mt-1 text-sm text-muted">{run.error ? "Nothing is lost — you can try again." : "This takes about a minute. Keep this tab open."}</p>
+        <ol className="mt-5 space-y-3.5">
           {steps.map((s, i) => {
             const done = i < run.step;
             const active = i === run.step;
             return (
-              <div key={s} className={cx("flex items-start gap-2 text-sm", active ? "text-text" : "text-muted")}>
-                <span className="mt-0.5 shrink-0">
-                  {done ? (
-                    <Icon name="check" size={14} className="text-[var(--pass)]" />
-                  ) : active && run.error ? (
-                    <Icon name="x" size={14} style={{ color: "var(--fail)" }} />
-                  ) : active ? (
-                    <span className="block h-3.5 w-3.5 rounded-full border-2 border-brand border-t-transparent animate-spin-slow" />
-                  ) : (
-                    <span className="block h-3.5 w-3.5 rounded-full border" />
-                  )}
-                </span>
-                <span className="min-w-0 flex-1">
+              <li key={s} className="flex items-start gap-3">
+                {done ? (
+                  <StatusMark status="pass" size={24} />
+                ) : active && run.error ? (
+                  <StatusMark status="fail" size={24} />
+                ) : active ? (
+                  <StatusMark status="busy" size={24} />
+                ) : (
+                  <StatusMark status="todo" size={24} />
+                )}
+                <span className={cx("min-w-0 flex-1 pt-0.5 text-[15px]", active ? "font-bold text-text" : "text-muted")}>
                   {s}
                   {active && !run.error && (run.label !== s || run.pct !== undefined) && (
-                    <span className="mt-1 block text-xs text-muted">
+                    <span className="mt-0.5 block text-sm font-normal text-muted">
                       {run.label !== s ? run.label : ""}
                       {run.pct !== undefined && ` · ${run.pct}%`}
                     </span>
                   )}
                   {active && run.pct !== undefined && !run.error && (
-                    <span className="mt-1.5 block h-1 overflow-hidden rounded-full bg-surface-3">
+                    <span className="mt-2 block h-1.5 overflow-hidden rounded-full bg-surface-3">
                       <span className="block h-full bg-brand transition-all" style={{ width: `${run.pct}%` }} />
                     </span>
                   )}
                 </span>
-              </div>
+              </li>
             );
           })}
-        </div>
+        </ol>
         {run.error && (
           <>
-            <p className="mt-4 rounded-lg p-3 text-xs leading-relaxed" style={{ background: "var(--fail-soft)", color: "var(--fail)" }}>
+            <p className="mt-5 rounded-xl border px-4 py-3 text-sm" style={{ background: "var(--fail-soft)", borderColor: "var(--fail-border)" }}>
               {run.error}
             </p>
-            <div className="mt-4 flex justify-end gap-2">
+            <div className="mt-5 flex justify-end gap-2">
               {onOpen && (
-                <Button variant="secondary" size="sm" onClick={onOpen}>
-                  Open partial report
+                <Button variant="secondary" onClick={onOpen}>
+                  Open what we have
                 </Button>
               )}
-              <Button size="sm" onClick={onClose}>
-                Close
-              </Button>
+              <Button onClick={onClose}>Close</Button>
             </div>
           </>
         )}

@@ -273,3 +273,39 @@ export async function sendPushToIdentity(
   });
   return String(res.message ?? "Added to queue for processing");
 }
+
+/** Get one profile by its CleverTap ID (objectId) — website audits look up the crawler's visitor. */
+export async function getProfileByObjectId(creds: CtCredentials, objectId: string): Promise<ProfileDetail | null> {
+  try {
+    const res = await call(creds, "GET", `/1/profile.json?objectId=${encodeURIComponent(objectId)}`);
+    return (res.record as ProfileDetail | null) ?? null;
+  } catch (e) {
+    if (e instanceof CtApiError && (e.httpStatus === 404 || /not found/i.test(e.message))) return null;
+    throw e;
+  }
+}
+
+/** Send a web push to one user (Create Campaign API, by Identity / Email / objectId). */
+export async function sendWebPush(
+  creds: CtCredentials,
+  to: { identity?: string; objectId?: string },
+  opts: { title: string; body: string; deepLink?: string },
+): Promise<string> {
+  const target: Json = to.objectId
+    ? { objectId: [to.objectId] }
+    : to.identity!.includes("@")
+      ? { Email: [to.identity] }
+      : { Identity: [to.identity] };
+  const browser: Json = { ...(opts.deepLink ? { deep_link: opts.deepLink } : {}), require_interaction: true };
+  const res = await call(creds, "POST", "/1/send/webpush.json", {
+    to: target,
+    tag_group: "integration-audit-test",
+    respect_frequency_caps: false,
+    content: {
+      title: opts.title,
+      body: opts.body,
+      platform_specific: { chrome: browser, firefox: { ...(opts.deepLink ? { deep_link: opts.deepLink } : {}) }, safari: { ...(opts.deepLink ? { deep_link: opts.deepLink } : {}) } },
+    },
+  });
+  return String(res.message ?? "Added to queue for processing");
+}

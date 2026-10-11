@@ -25,6 +25,8 @@ export function CriticalEvents({ audit }: { audit: Audit }) {
     ...((audit.device ?? audit.iosDevice)?.logs?.events.map((e) => e.name) ?? []),
     ...customEventNames(audit.api?.testUser),
     ...(audit.scan?.eventNames ?? []),
+    ...(audit.webScan?.events.map((e) => e.name) ?? []),
+    ...(audit.webScan?.eventNames ?? []),
   ];
   const suggestions = [...new Set(seen)].filter((n) => !list.includes(n)).slice(0, 12);
 
@@ -39,7 +41,11 @@ export function CriticalEvents({ audit }: { audit: Audit }) {
     setMsg("");
     try {
       await api(`/api/audits/${audit.id}`, { method: "PATCH", body: JSON.stringify({ criticalEvents: list }) });
-      setMsg("Saved. Now do these actions on the phone under “Your key actions”.");
+      setMsg(
+        audit.platform === "web"
+          ? "Saved. Do these actions on your site, then Website tests → Check CleverTap again."
+          : "Saved. Now do these actions on the phone under “Your key actions”.",
+      );
     } catch (e) {
       setMsg((e as Error).message);
     } finally {

@@ -1,3 +1,6 @@
 {
-  "crons": [{ "path": "/api/cron/cleanup", "schedule": "0 3 * * *" }]
+  "crons": [{ "path": "/api/cron/cleanup", "schedule": "0 3 * * *" }],
+  "functions": {
+    "app/api/audits/[id]/crawl/route.ts": { "memory": 2048, "maxDuration": 300 }
+  }
 }

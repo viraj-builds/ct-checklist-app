@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@sparticuz/chromium": "^153.0.0",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",
     "@yume-chan/adb": "^2.6.4",
@@ -17,6 +18,7 @@
     "@yume-chan/stream-extra": "^2.6.1",
     "fflate": "^0.8.3",
     "next": "^16.3.8",
+    "puppeteer-core": "^25.13.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "server-only": "^0.0.1",

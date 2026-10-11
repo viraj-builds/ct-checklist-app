@@ -1,8 +1,10 @@
 import "server-only";
 import { db, UPLOAD_BUCKET } from "./supabase";
-import { getLatestIosVersion, getLatestVersions } from "./sdk-versions";
+import { getLatestIosVersion, getLatestVersions, getLatestWebVersion } from "./sdk-versions";
 import { evaluateAndroid } from "../engine/android";
 import { evaluateIos } from "../engine/ios";
+import { evaluateWeb } from "../engine/web";
+import type { WebLiveFindings, WebScanReport } from "../web/types";
 import type { AndroidScanReport } from "../analyzer/types";
 import type { IosScanReport } from "../analyzer/ios/types";
 import type { IosDeviceFindings } from "../device/ios/types";
@@ -40,9 +42,9 @@ interface AuditRow {
   file_sha256: string | null;
   storage_path: string | null;
   inputs: AuditInputs;
-  scan: AndroidScanReport | IosScanReport | null; // shape depends on platform
+  scan: AndroidScanReport | IosScanReport | WebScanReport | null; // shape depends on platform
   api: ApiFindings | null;
-  device: DeviceFindings | IosDeviceFindings | null;
+  device: DeviceFindings | IosDeviceFindings | WebLiveFindings | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -100,7 +102,9 @@ function toAudit(row: AuditRow, full: boolean): Audit {
     criticalEvents: row.inputs?.criticalEvents ?? [],
     results,
     ...(full
-      ? row.platform === "ios"
+      ? row.platform === "web"
+        ? { webScan: (row.scan as WebScanReport | null) ?? undefined, api: row.api ?? undefined, webLive: (row.device as WebLiveFindings | null) ?? undefined }
+        : row.platform === "ios"
         ? { iosScan: (row.scan as IosScanReport | null) ?? undefined, api: row.api ?? undefined, iosDevice: (row.device as IosDeviceFindings | null) ?? undefined }
         : { scan: (row.scan as AndroidScanReport | null) ?? undefined, api: row.api ?? undefined, device: (row.device as DeviceFindings | null) ?? undefined }
       : {}),
@@ -168,6 +172,7 @@ export async function createAudit(input: {
   accountId?: string;
   fileName?: string;
   fileSize?: number;
+  siteUrl?: string; // website audits
   owner: SessionUser;
   inputs: AuditInputs;
 }): Promise<{ id: string; storagePath?: string }> {
@@ -176,18 +181,18 @@ export async function createAudit(input: {
     .insert({
       name: input.name,
       platform: input.platform,
-      mode: input.inputs.expectApi ? "full" : input.source === "upload" ? "upload" : "cli",
+      mode: input.inputs.expectApi ? "full" : input.source === "upload" ? "upload" : input.source === "url" ? "url" : "cli",
       source: input.source,
       region: input.region ?? null,
       account_id: input.accountId ?? null,
-      target: input.fileName ?? null,
+      target: input.siteUrl ?? input.fileName ?? null,
       file_name: input.fileName ?? null,
       file_size: input.fileSize ?? null,
       submitted_by: input.owner.email,
       owner_id: input.owner.id,
       owner_email: input.owner.email,
       status: "draft",
-      stage: input.source === "upload" ? "Waiting for upload" : "Waiting for scan",
+      stage: input.source === "upload" ? "Waiting for upload" : input.source === "url" ? "Checking the website" : "Waiting for scan",
       inputs: input.inputs,
     })
     .select("id")
@@ -243,9 +248,11 @@ export async function setCriticalEvents(id: string, events: string[]) {
 }
 
 /** Save a static scan report and re-derive results. */
-export async function saveScan(id: string, scan: AndroidScanReport | IosScanReport) {
+export async function saveScan(id: string, scan: AndroidScanReport | IosScanReport | WebScanReport) {
   // The token ships inside every app build, but there's no reason to keep it.
-  if ("platform" in scan && scan.platform === "ios") {
+  if ("platform" in scan && scan.platform === "web") {
+    // nothing secret in a crawl report (identity / email / phone are masked by the crawler)
+  } else if ("platform" in scan && scan.platform === "ios") {
     if (scan.plist.token) scan.plist.token = scan.plist.token.slice(0, 3) + "•••";
   } else {
     const md = (scan as AndroidScanReport).manifest?.metaData;
@@ -256,7 +263,7 @@ export async function saveScan(id: string, scan: AndroidScanReport | IosScanRepo
   const expectApi = !!row.inputs?.expectApi && !row.api;
   await updateAudit(id, {
     scan,
-    file_sha256: scan.file.sha256,
+    file_sha256: "file" in scan ? scan.file.sha256 : null,
     status: expectApi ? "verifying" : "completed",
     stage: expectApi ? "Verifying with the CleverTap API" : null,
     error: null,
@@ -281,7 +288,8 @@ export async function recompute(id: string) {
   const row = await getRow(id);
   if (!row) return;
   if (row.platform === "ios") return recomputeIos(id, row);
-  if (row.platform !== "android") return; // Web engine comes later
+  if (row.platform === "web") return recomputeWeb(id, row);
+  if (row.platform !== "android") return;
 
   const latest = await getLatestVersions().catch(() => null);
   const results = evaluateAndroid({
@@ -294,6 +302,41 @@ export async function recompute(id: string) {
     criticalEvents: row.inputs?.criticalEvents ?? [],
     since: row.created_at ? new Date(row.created_at).getTime() : undefined,
   });
+  const overridden = new Set((row.audit_results ?? []).filter((r) => r.manual_override).map((r) => r.item_id));
+  const rows = Object.values(results)
+    .filter((r) => !overridden.has(r.itemId))
+    .map((r) => ({
+      audit_id: id,
+      item_id: r.itemId,
+      status: r.status,
+      detected: r.detected ?? null,
+      evidence: r.evidence ?? null,
+      remediation: r.remediation ?? null,
+      details: r.details ?? [],
+      source: r.source ?? "static",
+      manual_override: false,
+    }));
+  if (rows.length) {
+    const { error } = await db().from("audit_results").upsert(rows, { onConflict: "audit_id,item_id" });
+    if (error) fail(error, "save results");
+  }
+}
+
+async function recomputeWeb(id: string, row: AuditRow) {
+  const latest = await getLatestWebVersion();
+  const results = evaluateWeb({
+    scan: row.scan as WebScanReport | null,
+    live: row.device as WebLiveFindings | null,
+    api: row.api,
+    latest,
+    accountId: row.account_id,
+    region: row.region,
+    criticalEvents: row.inputs?.criticalEvents ?? [],
+  });
+  await saveResults(id, row, results);
+}
+
+async function saveResults(id: string, row: AuditRow, results: Record<string, ItemResult>) {
   const overridden = new Set((row.audit_results ?? []).filter((r) => r.manual_override).map((r) => r.item_id));
   const rows = Object.values(results)
     .filter((r) => !overridden.has(r.itemId))

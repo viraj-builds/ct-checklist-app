@@ -12,11 +12,11 @@ import { api } from "@/lib/store";
 import { scanInBrowser } from "@/lib/analyzer/android/client";
 import { scanIosInBrowser } from "@/lib/analyzer/ios/client";
 import { uploadToSignedUrl } from "@/lib/upload";
-import { rememberPasscode } from "@/lib/session-secrets";
+import { rememberIdentity, rememberPasscode, rememberWebLogin } from "@/lib/session-secrets";
 import { cx, formatBytes } from "@/lib/format";
 
 const PLATFORMS: Platform[] = ["android", "ios", "web"];
-const AVAILABLE: Record<Platform, boolean> = { android: true, ios: true, web: false };
+const AVAILABLE: Record<Platform, boolean> = { android: true, ios: true, web: true };
 const PLATFORM_NEEDS: Record<Platform, string> = {
   android: "Your APK or AAB, plus a test phone",
   ios: "Your IPA, plus a test iPhone",
@@ -42,7 +42,7 @@ const DROP_HINT: Record<Platform, string> = {
   ios: ".ipa",
   web: ".zip",
 };
-type ScanWhere = "browser" | "upload";
+type ScanWhere = "browser" | "upload" | "url";
 
 interface RunState {
   step: number; // index into run steps
@@ -66,7 +66,13 @@ export default function NewAuditPage() {
   const [file, setFile] = useState<File | null>(null);
   // Builds are scanned in the browser. Server upload ("upload") still works in
   // the backend and can be re-enabled here if a slow-device option is needed.
-  const where: ScanWhere = "browser";
+  const [siteUrl, setSiteUrl] = useState("");
+  const [loginUrl, setLoginUrl] = useState("");
+  const [loginUser, setLoginUser] = useState("");
+  const [loginPass, setLoginPass] = useState("");
+  const [showLoginPass, setShowLoginPass] = useState(false);
+  const isWeb = platform === "web";
+  const where: ScanWhere = isWeb ? "url" : "browser";
   const [events, setEvents] = useState("");
   const [run, setRun] = useState<RunState | null>(null);
 
@@ -83,7 +89,7 @@ export default function NewAuditPage() {
   }
 
   async function start() {
-    if (!platform || !file) return;
+    if (!platform || (isWeb ? !siteUrl.trim() : !file)) return;
     const withApi = !skipApi;
     const steps = runSteps(where, withApi);
     const go = (i: number, extra: Partial<RunState> = {}) => setRun((r) => ({ ...r, step: i, label: steps[i], pct: undefined, error: undefined, ...extra }));
@@ -98,8 +104,7 @@ export default function NewAuditPage() {
           source: where,
           region,
           accountId: accountId.trim(),
-          fileName: file.name,
-          fileSize: file.size,
+          ...(isWeb ? { siteUrl: siteUrl.trim() } : { fileName: file!.name, fileSize: file!.size }),
           withApi,
           criticalEvents,
         }),
@@ -107,21 +112,29 @@ export default function NewAuditPage() {
       auditId = created.id;
       if (withApi) rememberPasscode(auditId, passcode);
 
-      if (where === "browser") {
+      let identity: string | undefined;
+      if (where === "url") {
+        go(1, { auditId });
+        const login = loginUser.trim() && loginPass ? { url: loginUrl.trim() || undefined, username: loginUser.trim(), password: loginPass } : undefined;
+        if (login) rememberWebLogin(auditId, login);
+        const crawled = await api<{ identity?: string }>(`/api/audits/${auditId}/crawl`, { method: "POST", body: JSON.stringify({ login }) });
+        identity = crawled.identity ?? (login && login.username.includes("@") ? login.username : undefined);
+        if (identity) rememberIdentity(auditId, identity);
+      } else if (where === "browser") {
         go(1, { auditId });
         const onProgress = (stage: string, pct: number) => setRun((r) => r && { ...r, label: stage, pct });
-        const report = platform === "ios" ? await scanIosInBrowser(file, onProgress) : await scanInBrowser(file, onProgress);
+        const report = platform === "ios" ? await scanIosInBrowser(file!, onProgress) : await scanInBrowser(file!, onProgress);
         await api(`/api/audits/${auditId}/scan`, { method: "POST", body: JSON.stringify(report) });
       } else {
         go(1, { auditId, pct: 0 });
-        await uploadToSignedUrl(created.upload!.url, file, (pct) => setRun((r) => r && { ...r, pct }));
+        await uploadToSignedUrl(created.upload!.url, file!, (pct) => setRun((r) => r && { ...r, pct }));
         go(2, { auditId });
         await api(`/api/audits/${auditId}/analyze`, { method: "POST" });
       }
 
       if (withApi) {
         go(steps.length - 2, { auditId });
-        await api(`/api/audits/${auditId}/verify`, { method: "POST", body: JSON.stringify({ passcode }) });
+        await api(`/api/audits/${auditId}/verify`, { method: "POST", body: JSON.stringify({ passcode, ...(identity ? { identity } : {}) }) });
       }
       go(steps.length - 1, { auditId });
       router.push(`/audit/${auditId}`);
@@ -151,7 +164,7 @@ export default function NewAuditPage() {
               n={1}
               state={step === 0 ? "current" : "done"}
               title="Choose what to audit"
-              done={platform ? `${PLATFORM_META[platform].label} app · ${itemCount} checks` : ""}
+              done={platform ? `${platform === "web" ? "Website" : `${PLATFORM_META[platform].label} app`} · ${itemCount} checks` : ""}
               onChange={busy ? undefined : () => setStep(0)}
             >
               <div role="group" aria-label="Platform" className="grid gap-3 sm:grid-cols-3">
@@ -271,8 +284,27 @@ export default function NewAuditPage() {
               n={3}
               state={step === 2 ? "current" : "upcoming"}
               title={`Add your ${platform ? PLATFORM_META[platform].targetLabel : "build"}`}
-              hint="We scan it right here in your browser"
+              hint={isWeb ? "We open it in a private browser and watch what CleverTap receives" : "We scan it right here in your browser"}
             >
+              {isWeb ? (
+                <WebTarget
+                  siteUrl={siteUrl}
+                  setSiteUrl={setSiteUrl}
+                  loginUrl={loginUrl}
+                  setLoginUrl={setLoginUrl}
+                  loginUser={loginUser}
+                  setLoginUser={setLoginUser}
+                  loginPass={loginPass}
+                  setLoginPass={setLoginPass}
+                  showPass={showLoginPass}
+                  setShowPass={setShowLoginPass}
+                  events={events}
+                  setEvents={setEvents}
+                  canStart={!!siteUrl.trim() && projectValid() && !busy}
+                  busy={busy}
+                  onStart={start}
+                />
+              ) : (
               <div className="space-y-6">
                 <div>
                   <Dropzone accept={platform ? PLATFORM_META[platform].accept : ""} file={file} onFile={setFile} hint={platform ? DROP_HINT[platform] : ""} />
@@ -320,6 +352,7 @@ export default function NewAuditPage() {
                   <span className="text-sm text-muted">Takes about a minute. Your progress is saved as you go.</span>
                 </div>
               </div>
+              )}
             </StepBlock>
           </Card>
         </section>
@@ -368,7 +401,7 @@ export default function NewAuditPage() {
 function runSteps(where: ScanWhere, withApi: boolean): string[] {
   return [
     "Creating audit",
-    ...(where === "browser" ? ["Checking the build"] : ["Uploading the build", "Analysing on the server"]),
+    ...(where === "url" ? ["Checking the website"] : where === "browser" ? ["Checking the build"] : ["Uploading the build", "Analysing on the server"]),
     ...(withApi ? ["Verifying with the CleverTap API"] : []),
     "Building report",
   ];
@@ -586,6 +619,119 @@ function RunningOverlay({
           </>
         )}
       </Card>
+    </div>
+  );
+}
+
+function WebTarget(p: {
+  siteUrl: string;
+  setSiteUrl: (v: string) => void;
+  loginUrl: string;
+  setLoginUrl: (v: string) => void;
+  loginUser: string;
+  setLoginUser: (v: string) => void;
+  loginPass: string;
+  setLoginPass: (v: string) => void;
+  showPass: boolean;
+  setShowPass: (fn: (v: boolean) => boolean) => void;
+  events: string;
+  setEvents: (v: string) => void;
+  canStart: boolean;
+  busy: boolean;
+  onStart: () => void;
+}) {
+  return (
+    <div className="space-y-6">
+      <Field label="Website address" htmlFor="site" hint="The public or staging URL where CleverTap is installed.">
+        <input
+          id="site"
+          type="url"
+          inputMode="url"
+          value={p.siteUrl}
+          onChange={(e) => p.setSiteUrl(e.target.value)}
+          placeholder="For example https://www.yourstore.com"
+          className="input font-mono"
+        />
+      </Field>
+
+      <div className="rounded-xl border px-4 py-4">
+        <div className="flex items-center gap-2 text-[15px] font-bold">
+          <Icon name="user" size={17} className="text-brand" /> Test login for your website (recommended)
+        </div>
+        <p className="mt-1 text-sm text-text-2">
+          We sign in once with a test account to check onUserLogin, identity, phone format and returning users. Leave empty to only check what a logged-out
+          visitor sends.
+        </p>
+        <div className="mt-4 space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Email or username" htmlFor="wl-user">
+              <input
+                id="wl-user"
+                autoComplete="off"
+                data-1p-ignore
+                data-lpignore="true"
+                value={p.loginUser}
+                onChange={(e) => p.setLoginUser(e.target.value)}
+                placeholder="test.user@yourstore.com"
+                className="input"
+              />
+            </Field>
+            <Field label="Password" htmlFor="wl-pass">
+              <div className="relative">
+                <input
+                  id="wl-pass"
+                  type={p.showPass ? "text" : "password"}
+                  autoComplete="new-password"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  value={p.loginPass}
+                  onChange={(e) => p.setLoginPass(e.target.value)}
+                  placeholder="Test account password"
+                  className="input pr-12"
+                />
+                <button
+                  type="button"
+                  onClick={() => p.setShowPass((v) => !v)}
+                  className="absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted hover:bg-surface-3 hover:text-text"
+                  aria-label={p.showPass ? "Hide password" : "Show password"}
+                >
+                  <Icon name={p.showPass ? "eyeOff" : "eye"} size={18} />
+                </button>
+              </div>
+            </Field>
+          </div>
+          <Field label="Login page (optional)" htmlFor="wl-url" hint="Only if we can't find the login form from the home page, e.g. /login or /account/sign-in.">
+            <input id="wl-url" value={p.loginUrl} onChange={(e) => p.setLoginUrl(e.target.value)} placeholder="/login" className="input font-mono" />
+          </Field>
+        </div>
+        <p className="mt-3 flex items-start gap-2 text-[13px] text-muted">
+          <Icon name="lock" size={14} className="mt-0.5 shrink-0" style={{ color: "var(--pass)" }} />
+          Use a test account, not a real customer&apos;s. The password is used once for this check and never stored. Logins with OTP or captcha can&apos;t be
+          automated — leave it empty and use Website tests afterwards.
+        </p>
+      </div>
+
+      <div className="rounded-xl border px-4 py-3.5" style={{ background: "var(--brand-soft)" }}>
+        <div className="flex items-center gap-2 text-[15px] font-bold">
+          <Icon name="info" size={17} className="text-brand" /> Nothing to change on your site
+        </div>
+        <p className="mt-1 text-sm text-text-2">
+          We open it in a private browser with CleverTap&apos;s debug logs switched on (the same as typing{" "}
+          <code className="font-mono text-[13px]">sessionStorage[&apos;WZRK_D&apos;]=&apos;&apos;</code> in the console), visit with test UTM tags, and read every
+          request the SDK sends. We only follow links — we never click buy, delete or log-out buttons.
+        </p>
+      </div>
+
+      <Field label="Your key events (optional)" htmlFor="events" hint="The 3–4 custom events that matter most, spelled exactly as in your code. You can change them later.">
+        <input id="events" value={p.events} onChange={(e) => p.setEvents(e.target.value)} placeholder="For example Product Viewed, Added To Cart, Charged" className="input" />
+      </Field>
+
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+        <Button size="lg" icon="zap" onClick={p.onStart} disabled={!p.canStart}>
+          {p.busy ? "Starting…" : "Start audit"}
+        </Button>
+        <span className="text-sm text-muted">Takes 1–2 minutes. Your progress is saved as you go.</span>
+      </div>
     </div>
   );
 }

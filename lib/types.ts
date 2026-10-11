@@ -85,6 +85,9 @@ export interface Audit {
   // iOS audits keep their scan / live findings here (same DB columns, own shapes)
   iosScan?: import("./analyzer/ios/types").IosScanReport;
   iosDevice?: import("./device/ios/types").IosDeviceFindings;
+  // Website audits: the crawler's report
+  webScan?: import("./web/types").WebScanReport;
+  webLive?: import("./web/types").WebLiveFindings; // live session in the user's Chrome
 }
 
 export interface FaqEntry {

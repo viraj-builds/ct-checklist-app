@@ -52,6 +52,29 @@ export interface ApiFindings {
   testUser?: TestUserRecord;
   testPush?: TestPushRecord; // most recent
   pushTests?: Partial<Record<"foreground" | "background" | "killed", TestPushRecord>>;
+  web?: WebApiFindings; // website audits only
+}
+
+/** One profile looked up for a website audit (the crawler's visitor, or the test user). */
+export interface WebProfileRecord {
+  key: string; // masked identity / email, or the CleverTap ID
+  found: boolean;
+  checkedAt: number;
+  identified: boolean; // has Identity or Email
+  hasEmail: boolean;
+  hasPhone: boolean;
+  phoneValid?: boolean;
+  nullishFields: string[];
+  webPushToken: boolean; // a browser on this profile is subscribed to web push
+  browsers: string[]; // e.g. "Chrome 141"
+  events: Record<string, { count?: number; lastSeen?: number }>; // epoch ms
+}
+
+export interface WebApiFindings {
+  visitor?: WebProfileRecord; // the anonymous profile the crawler's browser created
+  user?: WebProfileRecord; // the test user (login identity)
+  webPush?: ChannelStats; // Get Message Reports, last 30 days
+  tests?: Partial<Record<"push" | "deeplink", TestPushRecord>>;
 }
 
 export interface ChannelStats {

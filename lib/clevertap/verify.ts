@@ -162,7 +162,7 @@ export async function checkTestUser(creds: CtCredentials, identity: string, plat
   };
 }
 
-async function safeSample(
+export async function safeSample(
   creds: CtCredentials,
   name: string,
   days: number,
@@ -185,7 +185,7 @@ const DATE_STRING = /^(\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?)?|\d{1,2}[/-]\
 const NUMERIC_KEY = /amount|price|qty|quantity|total|revenue|value|count|discount|cost/i;
 const E164 = /^\+[1-9]\d{7,14}$/;
 
-function summarizeEvents(
+export function summarizeEvents(
   name: string,
   days: number,
   batch: number,
@@ -224,7 +224,7 @@ function summarizeEvents(
   return sample;
 }
 
-function summarizeProfiles(source: string, recs: EventRecord[], platform: string): ProfileSample {
+export function summarizeProfiles(source: string, recs: EventRecord[], platform: string): ProfileSample {
   const seen = new Set<string>();
   const s: ProfileSample = {
     source,

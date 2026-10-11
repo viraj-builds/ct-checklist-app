@@ -24,7 +24,7 @@ export function AuditCard({ audit, first }: { audit: Audit; first?: boolean }) {
       <div className="min-w-0 flex-1 basis-48">
         <div className="truncate text-base font-bold">{audit.name}</div>
         <div className="mt-0.5 text-sm text-muted">
-          {PLATFORM_META[audit.platform].label} app · {timeAgo(audit.createdAt)}
+          {audit.platform === "web" ? "Website" : `${PLATFORM_META[audit.platform].label} app`} · {timeAgo(audit.createdAt)}
         </div>
       </div>
       <div className="hidden w-48 md:block">

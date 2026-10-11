@@ -15,12 +15,15 @@ import { DeviceLab, type DeviceView } from "./DeviceLab";
 import { IosLab } from "./ios/IosLab";
 import { IOS_HOW_TO_CHECK, IOS_NOTES } from "@/lib/ios-meta";
 import { CriticalEvents } from "./CriticalEvents";
+import { WebLab } from "./web/WebLab";
+import { WEB_HOW_TO_CHECK } from "@/lib/web-meta";
+import type { WebScanReport } from "@/lib/web/types";
 import { Card, Button, StatusBadge, StatusMark, MethodBadge, PlatformIcon, StatBar, EmptyState, Badge, Notice } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 import { formatDate, formatBytes, cx } from "@/lib/format";
 
 type Filter = "all" | ItemStatus;
-type StageId = "overview" | DeviceView | "confirm" | "all";
+type StageId = "overview" | DeviceView | "web" | "confirm" | "all";
 type Mark = ItemStatus | "todo";
 
 const FRAMEWORK_LABEL: Record<string, string> = {
@@ -45,7 +48,9 @@ const readHash = () => window.location.hash.slice(1);
 const GUIDED_ITEMS = ["app-t1-onuserlogin-update", "app-t4-critical-events", "app-t3-deeplink-internal", "app-t3-deeplink-external", "app-t3-test-inapp"];
 const IOS_GUIDED_ITEMS = [...GUIDED_ITEMS, "app-ios-push-click"];
 const IOS_PUSH_STAGE = [...PUSH_ITEMS, "app-ios-notification-permission", "app-t1-device-token"];
-const howToCheck = (platform: Platform) => (platform === "ios" ? IOS_HOW_TO_CHECK : HOW_TO_CHECK);
+const howToCheck = (platform: Platform) => (platform === "web" ? WEB_HOW_TO_CHECK : platform === "ios" ? IOS_HOW_TO_CHECK : HOW_TO_CHECK);
+// Website items the Website tests stage ticks
+const WEB_LAB_ITEMS = Object.keys(WEB_HOW_TO_CHECK);
 
 export function Results({ id }: { id: string }) {
   const router = useRouter();
@@ -119,6 +124,7 @@ export function Results({ id }: { id: string }) {
   const hasLab = audit.platform === "android" && !!audit.accountId;
   const hasIosLab = audit.platform === "ios" && !!audit.accountId;
   const anyLab = hasLab || hasIosLab;
+  const hasWebLab = audit.platform === "web" && !!audit.accountId;
   const labDone = hasIosLab ? !!audit.iosDevice : !!audit.device;
   const progressOf = (ids: string[]): { mark: Mark; text: string } => {
     const present = ids.filter((x) => items.some((it) => it.id === x));
@@ -179,6 +185,19 @@ export function Results({ id }: { id: string }) {
           },
         ]
       : []),
+    ...(hasWebLab
+      ? [
+          {
+            id: "web" as const,
+            name: "Website tests",
+            purpose: "We open your site like a visitor (and log in with your test account), confirm it in CleverTap, and send a test web push.",
+            ...(() => {
+              const p = progressOf(WEB_LAB_ITEMS);
+              return { mark: (audit.webScan ? p.mark : "todo") as Mark, summary: audit.webScan ? p.text : "Not checked yet" };
+            })(),
+          },
+        ]
+      : []),
     ...(hasConfirm
       ? [
           {
@@ -203,7 +222,11 @@ export function Results({ id }: { id: string }) {
   const nextStage = stages[idx + 1];
   const deviceView: DeviceView | null = current.id === "setup" || current.id === "push" || current.id === "guided" ? current.id : null;
   const stageForItem = (itemId: string): StageId | null =>
-    hasIosLab
+    hasWebLab
+      ? WEB_LAB_ITEMS.includes(itemId)
+        ? "web"
+        : null
+      : hasIosLab
       ? IOS_PUSH_STAGE.includes(itemId)
         ? "push"
         : "guided"
@@ -221,7 +244,8 @@ export function Results({ id }: { id: string }) {
   };
 
   const meta = [
-    `${PLATFORM_META[audit.platform].label} app`,
+    audit.platform === "web" ? "Website" : `${PLATFORM_META[audit.platform].label} app`,
+    audit.platform === "web" && audit.target,
     audit.region && (REGIONS.find((r) => r.id === audit.region)?.label ?? audit.region),
     audit.accountId,
     audit.fileName && `${audit.fileName}${audit.fileSize ? ` (${formatBytes(audit.fileSize)})` : ""}`,
@@ -369,8 +393,11 @@ export function Results({ id }: { id: string }) {
               <Verdict
                 running={running}
                 s={s}
+                web={audit.platform === "web"}
                 onPrimary={
-                  anyLab && !labDone
+                  hasWebLab && !audit.webScan
+                    ? { label: "Next: check your website", go: () => setStage("web") }
+                    : anyLab && !labDone
                     ? { label: hasIosLab ? "Next: connect your iPhone" : "Next: connect your phone", go: () => setStage("setup") }
                     : issues.length
                       ? { label: "See every check", go: () => setStage("all") }
@@ -441,15 +468,18 @@ export function Results({ id }: { id: string }) {
 
               {audit.scan && <ScanSummary scan={audit.scan} audit={audit} />}
               {audit.iosScan && <IosScanSummary scan={audit.iosScan} />}
+              {audit.webScan && <WebScanSummary scan={audit.webScan} />}
 
               {audit.platform === "android" && !hasLab && <CriticalEvents audit={audit} />}
               {audit.platform === "ios" && !hasIosLab && <CriticalEvents audit={audit} />}
+              {audit.platform === "web" && <CriticalEvents audit={audit} />}
             </div>
           </div>
 
           {/* ---------- Device stages (always mounted) ---------- */}
           {hasLab && <DeviceLab audit={audit} view={deviceView} onNavigate={(v) => setStage(v)} />}
           {hasIosLab && <IosLab audit={audit} view={deviceView} onNavigate={(v) => setStage(v)} />}
+          {hasWebLab && <WebLab audit={audit} visible={current.id === "web"} />}
 
           {/* ---------- Confirm by hand ---------- */}
           {hasConfirm && (
@@ -550,16 +580,20 @@ export function Results({ id }: { id: string }) {
 function Verdict({
   running,
   s,
+  web,
   onPrimary,
 }: {
   running: boolean;
   s: ReturnType<typeof summarize>;
+  web?: boolean;
   onPrimary?: { label: string; go: () => void };
 }) {
   const { pass, fail, warn, manual, na } = s.counts;
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const headline = running
-    ? "Checking your build…"
+    ? web
+      ? "Checking your website…"
+      : "Checking your build…"
     : fail
       ? `${plural(fail, "thing", "things")} to fix`
       : warn
@@ -569,7 +603,7 @@ function Verdict({
           : "Everything passed";
   const sub = running
     ? "Results appear here as each check finishes."
-    : `${pass} of ${s.total} checks passed.${manual ? ` ${plural(manual, "check needs", "checks need")} your phone or a quick look.` : ""}`;
+    : `${pass} of ${s.total} checks passed.${manual ? ` ${plural(manual, "check needs", "checks need")} ${web ? "a test login, a test push" : "your phone"} or a quick look.` : ""}`;
   return (
     <Card className="p-7 md:p-8">
       <h3 className="max-w-[20ch] text-4xl font-bold tracking-[-0.025em]">{headline}</h3>
@@ -691,6 +725,43 @@ function IosScanSummary({ scan }: { scan: IosScanReport }) {
   );
 }
 
+function WebScanSummary({ scan }: { scan: WebScanReport }) {
+  let host = scan.finalUrl;
+  try {
+    host = new URL(scan.finalUrl).host;
+  } catch {
+    /* keep the raw URL */
+  }
+  const facts: [string, string][] = [
+    ["Website", host],
+    ["CleverTap SDK", scan.sdk.present ? (scan.sdk.version ? `v${scan.sdk.version}` : "found") : "not found"],
+    ["Installed", scan.sdk.loading === "head" ? "<head> snippet" : scan.sdk.loading === "bundle" ? "npm package" : scan.sdk.loading === "body" ? "script in <body>" : "—"],
+    ["Web push", scan.webPush.serviceWorker.clevertap ? (scan.webPush.vapidKey ? "set up" : "service worker only") : "no service worker"],
+  ];
+  return (
+    <section aria-labelledby="your-site">
+      <h3 id="your-site" className="text-xl font-bold">
+        Your website
+      </h3>
+      {scan.login.attempted && !scan.login.ok && (
+        <Notice tone="warn" title="The test login didn't work" className="mt-3">
+          {scan.login.message} Login checks are left for you — fix the login under Website tests and check again.
+        </Notice>
+      )}
+      <Card className="mt-4 grid grid-cols-2 overflow-hidden sm:grid-cols-4">
+        {facts.map(([k, v], i) => (
+          <div key={k} className={cx("px-5 py-4", i > 0 && "border-l", i === 2 && "max-sm:border-l-0 max-sm:border-t", i === 3 && "max-sm:border-t")}>
+            <div className="text-[13px] font-semibold text-muted">{k}</div>
+            <div className="mt-0.5 truncate text-[15px] font-bold" title={v}>
+              {v}
+            </div>
+          </div>
+        ))}
+      </Card>
+    </section>
+  );
+}
+
 /* ---------------- confirm-by-hand panel ---------------- */
 
 function LiveDevicePanel({
@@ -721,7 +792,12 @@ function LiveDevicePanel({
         </ol>
         <div className="mt-4 overflow-x-auto rounded-lg bg-surface-3 px-3.5 py-2.5 font-mono text-[13px]">{g.verbose}</div>
         <a href={g.helpVideo} target="_blank" rel="noreferrer" className="link mt-4 inline-flex items-center gap-1.5 text-sm">
-          {platform === "ios" ? "New to this? Watch how to turn on Developer Mode on an iPhone" : "New to this? Watch how to turn on USB debugging"} <Icon name="external" size={14} />
+          {platform === "web"
+            ? "New to this? Watch how to use the browser console and network tab"
+            : platform === "ios"
+              ? "New to this? Watch how to turn on Developer Mode on an iPhone"
+              : "New to this? Watch how to turn on USB debugging"}{" "}
+          <Icon name="external" size={14} />
         </a>
       </Card>
 

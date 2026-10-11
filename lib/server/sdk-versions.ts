@@ -50,6 +50,11 @@ export async function getLatestIosVersion(): Promise<string | undefined> {
   return cocoapod("CleverTap-iOS-SDK").catch(() => undefined);
 }
 
+/** Latest Web SDK (clevertap-web-sdk on npm). */
+export async function getLatestWebVersion(): Promise<string | undefined> {
+  return json<{ version: string }>("https://registry.npmjs.org/clevertap-web-sdk/latest", (j) => j.version).catch(() => undefined);
+}
+
 export async function getLatestVersions(): Promise<LatestVersions> {
   const settle = <T,>(p: Promise<T>) => p.catch(() => undefined);
   const [android, geofence, pushTemplates, flutter, reactNative, cordova] = await Promise.all([

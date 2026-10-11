@@ -66,8 +66,8 @@ export const PLATFORM_META: Record<
   web: {
     label: "Web",
     icon: "globe",
-    accept: ".zip",
-    targetLabel: "URL or source zip",
+    accept: "",
+    targetLabel: "website",
   },
 };
 
@@ -145,11 +145,11 @@ export const LIVE_GUIDE: Record<
     reads: "iPhone log (subsystem com.clevertap.sdk)",
   },
   web: {
-    verbose: "clevertap.setLogLevel(3)  //  or  sessionStorage['WZRK_D']=''",
+    verbose: "sessionStorage['WZRK_D'] = ''   // in the browser console — CleverTap debug logs",
     steps: [
-      "Open the site in the crawler with verbose logging on.",
-      "The crawler reads the browser console + network calls to CleverTap.",
-      "Trigger the web push / event to confirm the outcome.",
+      "Run Website tests → Check my website (with a test login) — most items tick themselves.",
+      "For web push, open your site in Chrome, log in as the test user, allow notifications, then send the test push from Website tests.",
+      "For anything left, check it yourself and choose It works or Not working.",
     ],
     helpVideo:
       "https://www.youtube.com/results?search_query=chrome+devtools+console+network+basics",

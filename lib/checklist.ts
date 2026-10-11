@@ -43,6 +43,7 @@ export const CHECKLIST: ChecklistItem[] = [
     expected: "The integrated SDK should be on (or near) the latest release.",
     method: "auto-static",
     docUrl: "https://developer.clevertap.com/docs/changelog",
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/ios-resources#changelog" },
   },
   {
     id: "app-t1-credentials",
@@ -57,6 +58,7 @@ export const CHECKLIST: ChecklistItem[] = [
     critical: true,
     faqRef: 1,
     docUrl: "https://developer.clevertap.com/docs/android-quickstart-guide",
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/ios-quickstart-guide#add-clevertap-credentials" },
   },
   {
     id: "app-t1-lifecycle",
@@ -105,6 +107,7 @@ export const CHECKLIST: ChecklistItem[] = [
     method: "auto-api",
     critical: true,
     faqRef: 3,
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/user-profiles-ios#create-a-user-profile-when-user-logs-in-on-user-login-method" },
   },
   {
     id: "app-t1-onuserlogin",
@@ -115,6 +118,7 @@ export const CHECKLIST: ChecklistItem[] = [
     expected: "To identify the individual users on the device.",
     method: "hybrid",
     faqRef: 3,
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/user-profiles-ios#create-a-user-profile-when-user-logs-in-on-user-login-method" },
   },
   {
     id: "app-t1-onuserlogin-update",
@@ -125,6 +129,7 @@ export const CHECKLIST: ChecklistItem[] = [
     expected:
       "Ensure previously logged-in users are re-identified after an app update.",
     method: "hybrid",
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/user-profiles-ios#create-a-user-profile-when-user-logs-in-on-user-login-method" },
   },
   {
     id: "app-t1-custom-events",
@@ -137,6 +142,7 @@ export const CHECKLIST: ChecklistItem[] = [
     method: "auto-api",
     docUrl: "https://developer.clevertap.com/docs/events",
     critical: true,
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/user-events-ios" },
   },
   {
     id: "app-t1-device-token",
@@ -146,6 +152,7 @@ export const CHECKLIST: ChecklistItem[] = [
     title: "Device token generated",
     expected: "Register the app with FCM / APNs to establish a token-based connection.",
     method: "auto-api",
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/push-notifications-ios#step-3-registering-for-push-notifications" },
   },
 
   // ===================== APP — TIER 2 =====================
@@ -160,6 +167,7 @@ export const CHECKLIST: ChecklistItem[] = [
     docUrl:
       "https://developer.clevertap.com/docs/sdk-changes-for-gdpr-compliance#device-network-information-reporting-in-android",
     faqRef: 5,
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/advanced-options-ios#enable-device-network-info-reporting" },
   },
   {
     id: "app-t2-lat-long",
@@ -172,6 +180,7 @@ export const CHECKLIST: ChecklistItem[] = [
     docUrl:
       "https://developer.clevertap.com/docs/concepts-user-profiles#user-location-handling",
     faqRef: 5,
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/advanced-options-ios#send-location-information-to-clevertap" },
   },
   {
     id: "app-t2-anon-profile",
@@ -191,6 +200,7 @@ export const CHECKLIST: ChecklistItem[] = [
     title: "Phone number format",
     expected: 'Phone pushed with correct country code and "+" prefix (e.g. +91).',
     method: "auto-api",
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/user-profiles-ios#phone" },
   },
 
   // ===================== APP — TIER 3 =====================
@@ -203,6 +213,7 @@ export const CHECKLIST: ChecklistItem[] = [
     expected: "Trigger a test push (green bell icon) and confirm it is received.",
     method: "auto-trigger",
     faqRef: 2,
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/push-notifications-ios#checking-push-notifications-from-clevertap" },
   },
   {
     id: "app-t3-killed",
@@ -213,6 +224,7 @@ export const CHECKLIST: ChecklistItem[] = [
     expected: "Push arrives even when the app is killed.",
     method: "manual",
     docUrl: "https://developer.clevertap.com/docs/android-push",
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/push-notifications-ios" },
   },
   {
     id: "app-t3-background",
@@ -223,6 +235,7 @@ export const CHECKLIST: ChecklistItem[] = [
     expected: "Push arrives when the app is in the background.",
     method: "manual",
     docUrl: "https://developer.clevertap.com/docs/android-push",
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/push-notifications-ios" },
   },
   {
     id: "app-t3-foreground",
@@ -233,6 +246,7 @@ export const CHECKLIST: ChecklistItem[] = [
     expected: "Push arrives when the app is open/foreground.",
     method: "manual",
     docUrl: "https://developer.clevertap.com/docs/android-push",
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/push-notifications-ios#setting-the-behaviour-of-push-notifications" },
   },
   {
     id: "app-t3-impressions",
@@ -255,6 +269,7 @@ export const CHECKLIST: ChecklistItem[] = [
     expected: "Push with an internal deep link redirects correctly within the app.",
     method: "hybrid",
     faqRef: 9,
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/push-notifications-ios#custom-handling-deeplinkexternal-url" },
   },
   {
     id: "app-t3-deeplink-external",
@@ -266,6 +281,7 @@ export const CHECKLIST: ChecklistItem[] = [
     method: "hybrid",
     docUrl: "https://developer.clevertap.com/docs/advanced-android-push-notification-options#deeplinkexternal-url",
     faqRef: 9,
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/push-notifications-ios#custom-handling-deeplinkexternal-url" },
   },
   {
     id: "app-t3-test-inapp",
@@ -275,6 +291,7 @@ export const CHECKLIST: ChecklistItem[] = [
     title: "Send test in-app",
     expected: "Trigger an in-app notification campaign and confirm it displays.",
     method: "hybrid",
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/in-app-notification-ios" },
   },
   {
     id: "app-t3-inapp-exclude",
@@ -286,6 +303,7 @@ export const CHECKLIST: ChecklistItem[] = [
     method: "manual",
     methodByPlatform: { android: "auto-static" },
     docUrl: "https://developer.clevertap.com/docs/android-in-app-notifications#exclude-in-app-from-android-activity",
+    docUrlByPlatform: { ios: "https://developer.clevertap.com/docs/in-app-notification-ios#suspend" },
   },
   {
     id: "app-t3-post-notifications",
@@ -356,6 +374,70 @@ export const CHECKLIST: ChecklistItem[] = [
       "3–4 key custom events and their properties from the event design sheet fire in the right format.",
     method: "hybrid",
     docUrl: "https://docs.clevertap.com/docs/sample-events-by-business-verticals",
+  },
+
+  // ===================== APP — iOS only =====================
+  {
+    id: "app-ios-push-capability",
+    scope: "app",
+    platforms: ["ios"],
+    tier: 1,
+    title: "Push Notifications capability (APNs)",
+    expected:
+      "The app is signed with the Push Notifications capability (aps-environment), set to production for App Store / TestFlight builds, and the matching APNs key is on the dashboard.",
+    method: "auto-static",
+    origin: "sdk",
+    critical: true,
+    docUrl: "https://developer.clevertap.com/docs/push-notifications-ios#step-2-enable-the-push-notifications-capability",
+  },
+  {
+    id: "app-ios-push-registration",
+    scope: "app",
+    platforms: ["ios"],
+    tier: 1,
+    title: "APNs token passed to CleverTap",
+    expected:
+      "The app registers for remote notifications and CleverTap gets the device token — through CleverTap.autoIntegrate() or setPushToken() in didRegisterForRemoteNotificationsWithDeviceToken.",
+    method: "auto-static",
+    origin: "sdk",
+    critical: true,
+    docUrl: "https://developer.clevertap.com/docs/push-notifications-ios#step-3-registering-for-push-notifications",
+  },
+  {
+    id: "app-ios-notification-permission",
+    scope: "app",
+    platforms: ["ios"],
+    tier: 3,
+    title: "Notification permission requested",
+    expected:
+      "The app asks for notification permission (UNUserNotificationCenter.requestAuthorization or CleverTap's push primer). Without it iOS never shows a push.",
+    method: "auto-static",
+    origin: "sdk",
+    docUrl: "https://developer.clevertap.com/docs/push-notifications-ios#ios-push-primer",
+  },
+  {
+    id: "app-ios-push-click",
+    scope: "app",
+    platforms: ["ios"],
+    tier: 3,
+    title: "Push taps handed to CleverTap",
+    expected:
+      "Taps on a push reach CleverTap (autoIntegrate, or handleNotificationWithData from your UNUserNotificationCenterDelegate) so Notification Clicked is recorded and deep links open.",
+    method: "hybrid",
+    origin: "sdk",
+    docUrl: "https://developer.clevertap.com/docs/push-notifications-ios#unusernotificationcenterdelegate",
+  },
+  {
+    id: "app-ios-nse",
+    scope: "app",
+    platforms: ["ios"],
+    tier: 3,
+    title: "Notification Service Extension (rich push)",
+    expected:
+      "A Notification Service Extension using CleverTap (CTNotificationServiceExtension) shows images / media in pushes and can record push impressions.",
+    method: "auto-static",
+    origin: "sdk",
+    docUrl: "https://developer.clevertap.com/docs/rich-push-notifications",
   },
 
   // ===================== WEB — TIER 1 =====================
@@ -504,6 +586,10 @@ export function tiersForPlatform(platform: Platform): (1 | 2 | 3 | 4)[] {
 
 export function methodFor(item: ChecklistItem, platform: Platform): CheckMethod {
   return item.methodByPlatform?.[platform] ?? item.method;
+}
+
+export function docUrlFor(item: ChecklistItem, platform: Platform): string | undefined {
+  return item.docUrlByPlatform?.[platform] ?? item.docUrl;
 }
 
 export function getItem(id: string): ChecklistItem | undefined {

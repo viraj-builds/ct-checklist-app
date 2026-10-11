@@ -10,6 +10,7 @@ export interface LatestVersions {
   cordova?: string; // clevertap-cordova (npm)
   geofence?: string;
   pushTemplates?: string;
+  ios?: string; // CleverTap-iOS-SDK (CocoaPods trunk)
   fetchedAt: number;
 }
 
@@ -27,6 +28,26 @@ async function json<T>(url: string, pick: (j: T) => string | undefined) {
   const res = await fetch(url, { next: { revalidate: REVALIDATE } });
   if (!res.ok) return undefined;
   return pick((await res.json()) as T);
+}
+
+// Newest stable CocoaPods release (trunk lists every version; pre-releases skipped).
+async function cocoapod(pod: string) {
+  return json<{ versions: { name: string }[] }>(`https://trunk.cocoapods.org/api/v1/pods/${pod}`, (j) =>
+    j.versions
+      .map((v) => v.name)
+      .filter((v) => /^\d+\.\d+\.\d+$/.test(v))
+      .sort((a, b) => {
+        const pa = a.split(".").map(Number);
+        const pb = b.split(".").map(Number);
+        return pa[0] - pb[0] || pa[1] - pb[1] || pa[2] - pb[2];
+      })
+      .at(-1),
+  );
+}
+
+/** Latest iOS SDK version; separate from getLatestVersions so Android audits never wait on it. */
+export async function getLatestIosVersion(): Promise<string | undefined> {
+  return cocoapod("CleverTap-iOS-SDK").catch(() => undefined);
 }
 
 export async function getLatestVersions(): Promise<LatestVersions> {

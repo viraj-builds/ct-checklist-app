@@ -15,7 +15,7 @@ export const POST = handle(async (req, ctx: RouteContext<"/api/audits/[id]/test-
   if (!audit.accountId || !audit.region) throw new HttpError(400, "Audit has no Account ID / region.");
   await assertActionQuota(user, id, "test-user", 60);
 
-  const testUser = await checkTestUser({ accountId: audit.accountId, passcode, region: audit.region }, identity, "Android");
+  const testUser = await checkTestUser({ accountId: audit.accountId, passcode, region: audit.region }, identity, audit.platform === "ios" ? "iOS" : "Android");
   const api: ApiFindings = audit.api ?? {
     ok: false,
     error: "Not verified yet",

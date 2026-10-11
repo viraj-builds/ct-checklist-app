@@ -14,15 +14,18 @@ const CreateAudit = z.object({
   source: z.enum(["browser", "upload"]),
   region: zRegion,
   accountId: zAccountId,
-  fileName: z
-    .string()
-    .trim()
-    .min(1)
-    .max(200)
-    .regex(/\.(apk|aab|apks|xapk)$/i, "Upload an .apk, .aab, .apks or .xapk"),
+  fileName: z.string().trim().min(1).max(200),
   fileSize: z.number().int().positive().max(MAX_UPLOAD, "File is larger than 500 MB"),
   withApi: z.boolean().default(true),
   criticalEvents: z.array(z.string().trim().min(1).max(120)).max(10).default([]),
+}).superRefine((v, ctx) => {
+  const ok = v.platform === "ios" ? /\.(ipa|zip)$/i.test(v.fileName) : /\.(apk|aab|apks|xapk)$/i.test(v.fileName);
+  if (!ok)
+    ctx.addIssue({
+      code: "custom",
+      path: ["fileName"],
+      message: v.platform === "ios" ? "Upload an .ipa, or a zipped .app / .xcarchive" : "Upload an .apk, .aab, .apks or .xapk",
+    });
 });
 
 // Create an audit. For "upload" audits this also returns a one-time signed
@@ -31,7 +34,8 @@ const CreateAudit = z.object({
 export const POST = handle(async (req, _ctx, user) => {
   const input = await body(req, CreateAudit);
   await assertCreateQuota(user);
-  if (input.platform !== "android") throw new HttpError(400, "Only Android audits are available right now.");
+  if (input.platform === "web") throw new HttpError(400, "Website audits aren't available yet.");
+  if (input.platform === "ios" && input.source !== "browser") throw new HttpError(400, "iOS builds are scanned in your browser.");
 
   const { id, storagePath } = await createAudit({
     name: input.name,

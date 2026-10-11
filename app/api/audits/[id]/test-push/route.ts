@@ -52,6 +52,7 @@ export const POST = handle(async (req, ctx: RouteContext<"/api/audits/[id]/test-
         body: `If you can see this, push delivery works ✅${input.marker ? ` [${input.marker}]` : ""}`,
         channelId: input.channelId || undefined,
         deepLink: input.deepLink || undefined,
+        ...(audit.platform === "ios" ? { platform: "ios" as const } : {}),
       },
     );
   } catch (e) {

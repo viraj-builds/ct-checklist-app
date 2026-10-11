@@ -13,7 +13,8 @@ const csp = [
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
   // 127.0.0.1:47811 = the optional local ADB helper (public/ct-device-bridge.mjs)
-  `connect-src 'self' ${supabase} http://127.0.0.1:47811${isDev ? " ws: wss:" : ""}`,
+  // 127.0.0.1:47812 = the local iOS Simulator helper (public/ct-ios-bridge.mjs)
+  `connect-src 'self' ${supabase} http://127.0.0.1:47811 http://127.0.0.1:47812${isDev ? " ws: wss:" : ""}`,
   "worker-src 'self' blob:",
   "frame-ancestors 'none'",
   "base-uri 'self'",

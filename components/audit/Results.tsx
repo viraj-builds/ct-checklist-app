@@ -4,13 +4,16 @@ import { useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAudit, summarize, setItemStatus, deleteAudit, useMounted } from "@/lib/store";
-import { itemsForPlatform, methodFor } from "@/lib/checklist";
+import { docUrlFor, itemsForPlatform, methodFor } from "@/lib/checklist";
 import { GROUPS, groupOf, groupName } from "@/lib/stages";
 import { getFaq } from "@/lib/faq";
 import { PLATFORM_META, REGIONS, LIVE_GUIDE, DOCS_HELP, HOW_TO_CHECK, ANDROID_NOTES, STATUS_LEGEND } from "@/lib/meta";
 import type { Audit, ChecklistItem, ItemResult, ItemStatus, Platform } from "@/lib/types";
 import type { AndroidScanReport } from "@/lib/analyzer/types";
+import type { IosScanReport } from "@/lib/analyzer/ios/types";
 import { DeviceLab, type DeviceView } from "./DeviceLab";
+import { IosLab } from "./ios/IosLab";
+import { IOS_HOW_TO_CHECK, IOS_NOTES } from "@/lib/ios-meta";
 import { CriticalEvents } from "./CriticalEvents";
 import { Card, Button, StatusBadge, StatusMark, MethodBadge, PlatformIcon, StatBar, EmptyState, Badge, Notice } from "@/components/ui";
 import { Icon } from "@/components/Icon";
@@ -40,6 +43,9 @@ const subscribeHash = (cb: () => void) => {
 const readHash = () => window.location.hash.slice(1);
 
 const GUIDED_ITEMS = ["app-t1-onuserlogin-update", "app-t4-critical-events", "app-t3-deeplink-internal", "app-t3-deeplink-external", "app-t3-test-inapp"];
+const IOS_GUIDED_ITEMS = [...GUIDED_ITEMS, "app-ios-push-click"];
+const IOS_PUSH_STAGE = [...PUSH_ITEMS, "app-ios-notification-permission", "app-t1-device-token"];
+const howToCheck = (platform: Platform) => (platform === "ios" ? IOS_HOW_TO_CHECK : HOW_TO_CHECK);
 
 export function Results({ id }: { id: string }) {
   const router = useRouter();
@@ -111,6 +117,9 @@ export function Results({ id }: { id: string }) {
 
   /* ---- stages ---- */
   const hasLab = audit.platform === "android" && !!audit.accountId;
+  const hasIosLab = audit.platform === "ios" && !!audit.accountId;
+  const anyLab = hasLab || hasIosLab;
+  const labDone = hasIosLab ? !!audit.iosDevice : !!audit.device;
   const progressOf = (ids: string[]): { mark: Mark; text: string } => {
     const present = ids.filter((x) => items.some((it) => it.id === x));
     const st = present.map(statusOf);
@@ -131,23 +140,29 @@ export function Results({ id }: { id: string }) {
       mark: overallMark,
       summary: running ? "Checking…" : s.counts.fail ? `${s.counts.fail} to fix` : s.counts.warn ? `${s.counts.warn} to look at` : "No fixes needed",
     },
-    ...(hasLab
+    ...(anyLab
       ? [
           {
             id: "setup" as const,
-            name: "Connect your phone",
-            purpose: "Link a test phone so we can run the live checks on a real device.",
-            mark: (audit.device ? "pass" : "todo") as Mark,
-            summary: audit.device
-              ? `${audit.device.device.model} checked`
-              : audit.api?.testUser?.found
-                ? "Test user found"
-                : "Not connected yet",
+            name: hasIosLab ? "Connect your iPhone" : "Connect your phone",
+            purpose: hasIosLab
+              ? "Link a test iPhone (cable or Wi-Fi) — or the Xcode Simulator — so we can run the live checks."
+              : "Link a test phone so we can run the live checks on a real device.",
+            mark: (labDone ? "pass" : "todo") as Mark,
+            summary: hasIosLab && audit.iosDevice
+              ? `${audit.iosDevice.device.name ?? (audit.iosDevice.target === "device" ? "iPhone" : "Simulator")} checked`
+              : !hasIosLab && audit.device
+                ? `${audit.device.device.model} checked`
+                : audit.api?.testUser?.found
+                  ? "Test user found"
+                  : "Not connected yet",
           },
           {
             id: "push" as const,
             name: "Push tests",
-            purpose: "We send a test push with the app open, in the background and closed, and watch it arrive.",
+            purpose: hasIosLab
+              ? "We send a test push with the app open, in the background and closed, and watch it arrive on the iPhone."
+              : "We send a test push with the app open, in the background and closed, and watch it arrive.",
             ...(() => {
               const p = progressOf(PUSH_ITEMS);
               return { mark: p.mark, summary: p.text };
@@ -158,7 +173,7 @@ export function Results({ id }: { id: string }) {
             name: "Guided checks",
             purpose: "Do a few everyday actions in the app. We read the SDK logs and tick each check for you.",
             ...(() => {
-              const p = progressOf(GUIDED_ITEMS);
+              const p = progressOf(hasIosLab ? IOS_GUIDED_ITEMS : GUIDED_ITEMS);
               return { mark: p.mark, summary: p.text };
             })(),
           },
@@ -188,7 +203,15 @@ export function Results({ id }: { id: string }) {
   const nextStage = stages[idx + 1];
   const deviceView: DeviceView | null = current.id === "setup" || current.id === "push" || current.id === "guided" ? current.id : null;
   const stageForItem = (itemId: string): StageId | null =>
-    !hasLab ? null : PUSH_ITEMS.includes(itemId) || itemId === "app-t1-fcm-service" ? "push" : "guided";
+    hasIosLab
+      ? IOS_PUSH_STAGE.includes(itemId)
+        ? "push"
+        : "guided"
+      : !hasLab
+        ? null
+        : PUSH_ITEMS.includes(itemId) || itemId === "app-t1-fcm-service"
+          ? "push"
+          : "guided";
 
   const openItem = (itemId: string) => {
     setFilter("all");
@@ -347,8 +370,8 @@ export function Results({ id }: { id: string }) {
                 running={running}
                 s={s}
                 onPrimary={
-                  hasLab && !audit.device
-                    ? { label: "Next: connect your phone", go: () => setStage("setup") }
+                  anyLab && !labDone
+                    ? { label: hasIosLab ? "Next: connect your iPhone" : "Next: connect your phone", go: () => setStage("setup") }
                     : issues.length
                       ? { label: "See every check", go: () => setStage("all") }
                       : nextStage
@@ -417,13 +440,16 @@ export function Results({ id }: { id: string }) {
               )}
 
               {audit.scan && <ScanSummary scan={audit.scan} audit={audit} />}
+              {audit.iosScan && <IosScanSummary scan={audit.iosScan} />}
 
               {audit.platform === "android" && !hasLab && <CriticalEvents audit={audit} />}
+              {audit.platform === "ios" && !hasIosLab && <CriticalEvents audit={audit} />}
             </div>
           </div>
 
           {/* ---------- Device stages (always mounted) ---------- */}
           {hasLab && <DeviceLab audit={audit} view={deviceView} onNavigate={(v) => setStage(v)} />}
+          {hasIosLab && <IosLab audit={audit} view={deviceView} onNavigate={(v) => setStage(v)} />}
 
           {/* ---------- Confirm by hand ---------- */}
           {hasConfirm && (
@@ -631,6 +657,40 @@ function ScanSummary({ scan }: { scan: AndroidScanReport; audit: Audit }) {
   );
 }
 
+function IosScanSummary({ scan }: { scan: IosScanReport }) {
+  const ct = scan.clevertap;
+  const sdk = ct.version ? `v${ct.version}` : ct.present ? "found" : "not found";
+  const facts: [string, string][] = [
+    ["App", scan.app.bundleId ?? "—"],
+    ["Version", scan.app.versionName ? `${scan.app.versionName} (${scan.app.buildNumber ?? "?"})` : "—"],
+    ["Framework", scan.framework.primary === "native" ? `Native (${scan.framework.signals.includes("Swift") ? "Swift" : "Obj-C"}${scan.app.swiftUi ? " · SwiftUI" : ""})` : FRAMEWORK_LABEL[scan.framework.primary]],
+    ["CleverTap SDK", sdk],
+  ];
+  return (
+    <section aria-labelledby="your-build">
+      <h3 id="your-build" className="text-xl font-bold">
+        Your build
+      </h3>
+      {scan.app.simulatorBuild && (
+        <Notice tone="info" title="This is a Simulator build" className="mt-3">
+          Code and push checks work, but signing and the APNs environment are judged on the build you ship. Scan the .ipa you upload to TestFlight / the App
+          Store for those.
+        </Notice>
+      )}
+      <Card className="mt-4 grid grid-cols-2 overflow-hidden sm:grid-cols-4">
+        {facts.map(([k, v], i) => (
+          <div key={k} className={cx("px-5 py-4", i > 0 && "border-l", i === 2 && "max-sm:border-l-0 max-sm:border-t", i === 3 && "max-sm:border-t")}>
+            <div className="text-[13px] font-semibold text-muted">{k}</div>
+            <div className="mt-0.5 truncate text-[15px] font-bold" title={v}>
+              {v}
+            </div>
+          </div>
+        ))}
+      </Card>
+    </section>
+  );
+}
+
 /* ---------------- confirm-by-hand panel ---------------- */
 
 function LiveDevicePanel({
@@ -661,7 +721,7 @@ function LiveDevicePanel({
         </ol>
         <div className="mt-4 overflow-x-auto rounded-lg bg-surface-3 px-3.5 py-2.5 font-mono text-[13px]">{g.verbose}</div>
         <a href={g.helpVideo} target="_blank" rel="noreferrer" className="link mt-4 inline-flex items-center gap-1.5 text-sm">
-          New to this? Watch how to turn on USB debugging <Icon name="external" size={14} />
+          {platform === "ios" ? "New to this? Watch how to turn on Developer Mode on an iPhone" : "New to this? Watch how to turn on USB debugging"} <Icon name="external" size={14} />
         </a>
       </Card>
 
@@ -674,7 +734,7 @@ function LiveDevicePanel({
         <Card className="overflow-hidden">
           {items.map((it, i) => {
             const st = statusOf(it.id);
-            const how = HOW_TO_CHECK[it.id];
+            const how = howToCheck(platform)[it.id];
             return (
               <div key={it.id} className={cx("flex flex-wrap items-start gap-4 px-6 py-5", i > 0 && "border-t")}>
                 <StatusMark status={st} />
@@ -695,7 +755,7 @@ function LiveDevicePanel({
                     <Button size="sm" variant="secondary" onClick={() => onSet(it.id, "fail")}>
                       Not working
                     </Button>
-                    <a href={it.docUrl || DOCS_HELP} target="_blank" rel="noreferrer" className="link ml-1 inline-flex items-center gap-1 text-sm">
+                    <a href={docUrlFor(it, platform) || DOCS_HELP} target="_blank" rel="noreferrer" className="link ml-1 inline-flex items-center gap-1 text-sm">
                       Docs <Icon name="external" size={13} />
                     </a>
                   </div>
@@ -711,8 +771,8 @@ function LiveDevicePanel({
 
 /* ---------------- item row ---------------- */
 
-function HowToCheck({ id, onGo }: { id: string; onGo?: () => void }) {
-  const h = HOW_TO_CHECK[id];
+function HowToCheck({ id, platform, onGo }: { id: string; platform: Platform; onGo?: () => void }) {
+  const h = howToCheck(platform)[id];
   return (
     <div className="rounded-xl px-4 py-3.5" style={{ background: "var(--brand-soft)" }}>
       <div className="flex items-center gap-1.5 text-sm font-bold text-brand-text">
@@ -780,7 +840,18 @@ function ItemRow({
         <div className="animate-fade-in space-y-4 px-5 pb-6 pt-1 sm:pl-[68px] sm:pr-6">
           <Detail label="What we expect">{item.expected}</Detail>
           {result?.evidence && <Detail label="What we found">{result.evidence}</Detail>}
-          {HOW_TO_CHECK[item.id] && status !== "pass" && status !== "na" && <HowToCheck id={item.id} onGo={onGo} />}
+          {howToCheck(platform)[item.id] && status !== "pass" && status !== "na" && <HowToCheck id={item.id} platform={platform} onGo={onGo} />}
+          {platform === "ios" && IOS_NOTES[item.id] && status !== "pass" && status !== "na" && (
+            <div className="rounded-xl border bg-surface-2 px-4 py-3.5">
+              <div className="flex items-center gap-1.5 text-sm font-bold text-text-2">
+                <Icon name="info" size={15} /> Good to know about iOS
+              </div>
+              <p className="mt-1 text-[15px] text-text-2">{IOS_NOTES[item.id].text}</p>
+              <a href={IOS_NOTES[item.id].url} target="_blank" rel="noreferrer" className="link mt-2 inline-flex items-center gap-1 text-sm">
+                CleverTap docs <Icon name="external" size={13} />
+              </a>
+            </div>
+          )}
           {platform === "android" && ANDROID_NOTES[item.id] && status !== "pass" && status !== "na" && (
             <div className="rounded-xl border bg-surface-2 px-4 py-3.5">
               <div className="flex items-center gap-1.5 text-sm font-bold text-text-2">
@@ -817,8 +888,8 @@ function ItemRow({
           )}
 
           <div className="flex flex-wrap items-center gap-2 pt-1">
-            {item.docUrl && (
-              <a href={item.docUrl} target="_blank" rel="noreferrer" className="link mr-2 inline-flex items-center gap-1 text-sm">
+            {docUrlFor(item, platform) && (
+              <a href={docUrlFor(item, platform)} target="_blank" rel="noreferrer" className="link mr-2 inline-flex items-center gap-1 text-sm">
                 Documentation <Icon name="external" size={13} />
               </a>
             )}

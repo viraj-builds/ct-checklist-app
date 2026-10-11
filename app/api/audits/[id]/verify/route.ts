@@ -21,10 +21,11 @@ export const POST = handle(async (req, ctx: RouteContext<"/api/audits/[id]/verif
   const findings = await verifyAppAccount(
     { accountId: audit.accountId, passcode, region: audit.region },
     {
-      platform: "Android",
+      platform: audit.platform === "ios" ? "iOS" : "Android",
       customEvents: [
         ...(audit.criticalEvents ?? []),
         ...(audit.scan?.eventNames ?? []),
+        ...(audit.iosScan?.eventNames ?? []),
         ...customEventNames(audit.api?.testUser),
       ],
       maxCustomEvents: 10,

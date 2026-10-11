@@ -1,8 +1,11 @@
 import "server-only";
 import { db, UPLOAD_BUCKET } from "./supabase";
-import { getLatestVersions } from "./sdk-versions";
+import { getLatestIosVersion, getLatestVersions } from "./sdk-versions";
 import { evaluateAndroid } from "../engine/android";
+import { evaluateIos } from "../engine/ios";
 import type { AndroidScanReport } from "../analyzer/types";
+import type { IosScanReport } from "../analyzer/ios/types";
+import type { IosDeviceFindings } from "../device/ios/types";
 import type { ApiFindings } from "../clevertap/types";
 import type { DeviceFindings } from "../device/types";
 import type { Audit, AuditSource, AuditStatus, ItemResult, ItemStatus, Platform } from "../types";
@@ -37,9 +40,9 @@ interface AuditRow {
   file_sha256: string | null;
   storage_path: string | null;
   inputs: AuditInputs;
-  scan: AndroidScanReport | null;
+  scan: AndroidScanReport | IosScanReport | null; // shape depends on platform
   api: ApiFindings | null;
-  device: DeviceFindings | null;
+  device: DeviceFindings | IosDeviceFindings | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -96,7 +99,11 @@ function toAudit(row: AuditRow, full: boolean): Audit {
     fileSize: row.file_size ?? undefined,
     criticalEvents: row.inputs?.criticalEvents ?? [],
     results,
-    ...(full ? { scan: row.scan ?? undefined, api: row.api ?? undefined, device: row.device ?? undefined } : {}),
+    ...(full
+      ? row.platform === "ios"
+        ? { iosScan: (row.scan as IosScanReport | null) ?? undefined, api: row.api ?? undefined, iosDevice: (row.device as IosDeviceFindings | null) ?? undefined }
+        : { scan: (row.scan as AndroidScanReport | null) ?? undefined, api: row.api ?? undefined, device: (row.device as DeviceFindings | null) ?? undefined }
+      : {}),
   };
 }
 
@@ -236,10 +243,14 @@ export async function setCriticalEvents(id: string, events: string[]) {
 }
 
 /** Save a static scan report and re-derive results. */
-export async function saveScan(id: string, scan: AndroidScanReport) {
+export async function saveScan(id: string, scan: AndroidScanReport | IosScanReport) {
   // The token ships inside every app build, but there's no reason to keep it.
-  const md = scan.manifest?.metaData;
-  if (md?.CLEVERTAP_TOKEN) md.CLEVERTAP_TOKEN = md.CLEVERTAP_TOKEN.slice(0, 3) + "•••";
+  if ("platform" in scan && scan.platform === "ios") {
+    if (scan.plist.token) scan.plist.token = scan.plist.token.slice(0, 3) + "•••";
+  } else {
+    const md = (scan as AndroidScanReport).manifest?.metaData;
+    if (md?.CLEVERTAP_TOKEN) md.CLEVERTAP_TOKEN = md.CLEVERTAP_TOKEN.slice(0, 3) + "•••";
+  }
   const row = await getRow(id);
   if (!row) throw new Error("Audit not found");
   const expectApi = !!row.inputs?.expectApi && !row.api;
@@ -269,14 +280,47 @@ export async function saveApi(id: string, api: ApiFindings) {
 export async function recompute(id: string) {
   const row = await getRow(id);
   if (!row) return;
-  if (row.platform !== "android") return; // iOS / Web engines come later
+  if (row.platform === "ios") return recomputeIos(id, row);
+  if (row.platform !== "android") return; // Web engine comes later
 
   const latest = await getLatestVersions().catch(() => null);
   const results = evaluateAndroid({
-    scan: row.scan,
+    scan: row.scan as AndroidScanReport | null,
     api: row.api,
-    device: row.device,
+    device: row.device as DeviceFindings | null,
     latest,
+    accountId: row.account_id,
+    region: row.region,
+    criticalEvents: row.inputs?.criticalEvents ?? [],
+    since: row.created_at ? new Date(row.created_at).getTime() : undefined,
+  });
+  const overridden = new Set((row.audit_results ?? []).filter((r) => r.manual_override).map((r) => r.item_id));
+  const rows = Object.values(results)
+    .filter((r) => !overridden.has(r.itemId))
+    .map((r) => ({
+      audit_id: id,
+      item_id: r.itemId,
+      status: r.status,
+      detected: r.detected ?? null,
+      evidence: r.evidence ?? null,
+      remediation: r.remediation ?? null,
+      details: r.details ?? [],
+      source: r.source ?? "static",
+      manual_override: false,
+    }));
+  if (rows.length) {
+    const { error } = await db().from("audit_results").upsert(rows, { onConflict: "audit_id,item_id" });
+    if (error) fail(error, "save results");
+  }
+}
+
+async function recomputeIos(id: string, row: AuditRow) {
+  const [ios, latest] = await Promise.all([getLatestIosVersion(), getLatestVersions().catch(() => null)]);
+  const results = evaluateIos({
+    scan: row.scan as IosScanReport | null,
+    api: row.api,
+    device: row.device as IosDeviceFindings | null,
+    latest: { ios, flutter: latest?.flutter, reactNative: latest?.reactNative, cordova: latest?.cordova },
     accountId: row.account_id,
     region: row.region,
     criticalEvents: row.inputs?.criticalEvents ?? [],

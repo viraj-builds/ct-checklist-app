@@ -10,16 +10,37 @@ import { itemsForPlatform } from "@/lib/checklist";
 import { GROUPS } from "@/lib/stages";
 import { api } from "@/lib/store";
 import { scanInBrowser } from "@/lib/analyzer/android/client";
+import { scanIosInBrowser } from "@/lib/analyzer/ios/client";
 import { uploadToSignedUrl } from "@/lib/upload";
 import { rememberPasscode } from "@/lib/session-secrets";
 import { cx, formatBytes } from "@/lib/format";
 
 const PLATFORMS: Platform[] = ["android", "ios", "web"];
-const AVAILABLE: Record<Platform, boolean> = { android: true, ios: false, web: false };
+const AVAILABLE: Record<Platform, boolean> = { android: true, ios: true, web: false };
 const PLATFORM_NEEDS: Record<Platform, string> = {
   android: "Your APK or AAB, plus a test phone",
   ios: "Your IPA, plus a test iPhone",
   web: "Your website URL",
+};
+// Debug-logging line from the CleverTap docs — the build must have it so the
+// live tests can read what the SDK does.
+const VERBOSE: Partial<Record<Platform, { code: string; wrappers: string; doc: string }>> = {
+  android: {
+    code: "CleverTapAPI.setDebugLevel(CleverTapAPI.LogLevel.VERBOSE);",
+    wrappers: "Flutter / React Native: CleverTapPlugin.setDebugLevel(3) · CleverTap.setDebugLevel(3)",
+    doc: "https://developer.clevertap.com/docs/android-quickstart-guide#debugging",
+  },
+  ios: {
+    code: "CleverTap.setDebugLevel(CleverTapLogLevel.debug.rawValue)",
+    wrappers: "Call it before CleverTap.autoIntegrate(). Flutter / React Native: setDebugLevel(3)",
+    doc: "https://developer.clevertap.com/docs/ios-quickstart-guide#debug-clevertap-sdk-in-your-swift-application",
+  },
+};
+
+const DROP_HINT: Record<Platform, string> = {
+  android: ".apk · .aab · .apks · .xapk",
+  ios: ".ipa",
+  web: ".zip",
 };
 type ScanWhere = "browser" | "upload";
 
@@ -88,7 +109,8 @@ export default function NewAuditPage() {
 
       if (where === "browser") {
         go(1, { auditId });
-        const report = await scanInBrowser(file, (stage, pct) => setRun((r) => r && { ...r, label: stage, pct }));
+        const onProgress = (stage: string, pct: number) => setRun((r) => r && { ...r, label: stage, pct });
+        const report = platform === "ios" ? await scanIosInBrowser(file, onProgress) : await scanInBrowser(file, onProgress);
         await api(`/api/audits/${auditId}/scan`, { method: "POST", body: JSON.stringify(report) });
       } else {
         go(1, { auditId, pct: 0 });
@@ -138,7 +160,11 @@ export default function NewAuditPage() {
                     key={p}
                     selected={platform === p}
                     disabled={!AVAILABLE[p]}
-                    onClick={() => AVAILABLE[p] && setPlatform(p)}
+                    onClick={() => {
+                      if (!AVAILABLE[p]) return;
+                      if (p !== platform) setFile(null);
+                      setPlatform(p);
+                    }}
                     icon={PLATFORM_META[p].icon as IconName}
                     title={`${PLATFORM_META[p].label} app`.replace("Web app", "Website")}
                     desc={PLATFORM_NEEDS[p]}
@@ -249,15 +275,31 @@ export default function NewAuditPage() {
             >
               <div className="space-y-6">
                 <div>
-                  <Dropzone accept={platform ? PLATFORM_META[platform].accept : ""} file={file} onFile={setFile} hint=".apk · .aab · .apks · .xapk" />
+                  <Dropzone accept={platform ? PLATFORM_META[platform].accept : ""} file={file} onFile={setFile} hint={platform ? DROP_HINT[platform] : ""} />
                   <p className="mt-2.5 flex items-center gap-2 text-sm text-muted">
                     <Icon name="lock" size={15} style={{ color: "var(--pass)" }} />
                     Checked in your browser — your app file isn&apos;t uploaded or stored.
                   </p>
-                  {platform === "android" && (
-                    <p className="mt-1.5 text-sm text-muted">
-                      Use the normal release build you ship. For the phone tests later, install a build with CleverTap debug logs on.
-                    </p>
+                  {platform && VERBOSE[platform] && (
+                    <div className="mt-4 rounded-xl border px-4 py-3.5" style={{ background: "var(--brand-soft)" }}>
+                      <div className="flex items-center gap-2 text-[15px] font-bold">
+                        <Icon name="info" size={17} className="text-brand" /> Before you upload: turn on CleverTap debug logs
+                      </div>
+                      <p className="mt-1 text-sm text-text-2">
+                        Build the {platform === "ios" ? ".ipa" : "APK / AAB"} with this line where you set up CleverTap, as the CleverTap docs describe. Then install
+                        that same build on your test {platform === "ios" ? "iPhone" : "phone"} — the live tests read these logs to check each item.
+                      </p>
+                      <code className="mt-2 block overflow-x-auto rounded-lg bg-surface px-3 py-2 font-mono text-[13px]">{VERBOSE[platform]!.code}</code>
+                      <p className="mt-1.5 text-[13px] text-muted">{VERBOSE[platform]!.wrappers}</p>
+                      <a href={VERBOSE[platform]!.doc} target="_blank" rel="noreferrer" className="link mt-1.5 inline-flex items-center gap-1 text-sm">
+                        CleverTap docs: debugging the SDK <Icon name="external" size={13} />
+                      </a>
+                      {platform === "ios" && (
+                        <p className="mt-2 text-[13px] text-muted">
+                          Export it from Xcode → Product → Archive → Distribute App → Development or Ad Hoc, so it installs on your test iPhone.
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
 

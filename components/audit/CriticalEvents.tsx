@@ -22,7 +22,7 @@ export function CriticalEvents({ audit }: { audit: Audit }) {
 
   // Events we've actually seen — offered as one-click suggestions.
   const seen = [
-    ...(audit.device?.logs?.events.map((e) => e.name) ?? []),
+    ...((audit.device ?? audit.iosDevice)?.logs?.events.map((e) => e.name) ?? []),
     ...customEventNames(audit.api?.testUser),
     ...(audit.scan?.eventNames ?? []),
   ];
@@ -49,7 +49,7 @@ export function CriticalEvents({ audit }: { audit: Audit }) {
   }
 
   const statusOf = (name: string) => {
-    const live = audit.device?.logs?.events.find((e) => e.name === name);
+    const live = (audit.device ?? audit.iosDevice)?.logs?.events.find((e) => e.name === name);
     const fromApi = audit.api?.events[name];
     if (live?.issues.length || Object.values(fromApi?.props ?? {}).some((p) => p.numericStrings || p.dateLikeStrings || p.types.nullish))
       return { t: "property issues", c: "var(--fail-text)" };

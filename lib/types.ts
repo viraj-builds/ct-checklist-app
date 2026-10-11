@@ -44,6 +44,8 @@ export interface ChecklistItem {
   // missing from the sheet.
   origin?: "c4s" | "sdk";
   docUrl?: string;
+  // Platform-specific docs (e.g. the iOS page for a shared app item); falls back to docUrl.
+  docUrlByPlatform?: Partial<Record<Platform, string>>;
   faqRef?: number; // index into FAQ list, 1-based
   critical?: boolean;
 }
@@ -80,6 +82,9 @@ export interface Audit {
   scan?: import("./analyzer/types").AndroidScanReport;
   api?: import("./clevertap/types").ApiFindings;
   device?: import("./device/types").DeviceFindings;
+  // iOS audits keep their scan / live findings here (same DB columns, own shapes)
+  iosScan?: import("./analyzer/ios/types").IosScanReport;
+  iosDevice?: import("./device/ios/types").IosDeviceFindings;
 }
 
 export interface FaqEntry {

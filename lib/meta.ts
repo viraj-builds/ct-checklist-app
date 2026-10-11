@@ -60,8 +60,8 @@ export const PLATFORM_META: Record<
   ios: {
     label: "iOS",
     icon: "apple",
-    accept: ".ipa,.zip,.xcarchive",
-    targetLabel: "IPA / .xcarchive",
+    accept: ".ipa",
+    targetLabel: "IPA",
   },
   web: {
     label: "Web",
@@ -136,14 +136,13 @@ export const LIVE_GUIDE: Record<
   ios: {
     verbose: "CleverTap.setDebugLevel(CleverTapLogLevel.debug.rawValue)",
     steps: [
-      "Connect the iPhone by USB and trust the computer.",
-      "Set the SDK debug level above in a development build.",
-      "Stream device console (Xcode Console or libimobiledevice / idevicesyslog).",
-      "Trigger the push/in-app; the tool parses the console output to confirm.",
+      "Run the Push tests and Guided checks stages with your iPhone connected (cable or Wi-Fi) — most items tick themselves.",
+      "Install a build with CleverTap debug logs on (the line below, before autoIntegrate) so we can confirm each action.",
+      "For anything left, check it yourself and choose It works or Not working.",
     ],
     helpVideo:
-      "https://www.youtube.com/results?search_query=view+iphone+console+logs+xcode+device",
-    reads: "device console (idevicesyslog)",
+      "https://www.youtube.com/results?search_query=enable+developer+mode+iphone+xcode",
+    reads: "iPhone log (subsystem com.clevertap.sdk)",
   },
   web: {
     verbose: "clevertap.setLogLevel(3)  //  or  sessionStorage['WZRK_D']=''",

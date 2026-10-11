@@ -257,16 +257,19 @@ export async function getRealtime(creds: CtCredentials): Promise<{ count: number
 export async function sendPushToIdentity(
   creds: CtCredentials,
   identity: string,
-  opts: { title: string; body: string; channelId?: string; deepLink?: string },
+  opts: { title: string; body: string; channelId?: string; deepLink?: string; platform?: "ios" },
 ): Promise<string> {
   const android: Json = {};
   if (opts.channelId) android.wzrk_cid = opts.channelId;
   if (opts.deepLink) android.deep_link = opts.deepLink;
+  // iOS audits: mutable-content lets a Notification Service Extension run (rich media / impressions)
+  const platform_specific: Json =
+    opts.platform === "ios" ? { ios: { "mutable-content": "true", ...(opts.deepLink ? { deep_link: opts.deepLink } : {}) } } : { android };
   const res = await call(creds, "POST", "/1/send/push.json", {
     to: identity.includes("@") ? { Email: [identity] } : { Identity: [identity] },
     tag_group: "integration-audit-test",
     respect_frequency_caps: false,
-    content: { title: opts.title, body: opts.body, platform_specific: { android } },
+    content: { title: opts.title, body: opts.body, platform_specific },
   });
   return String(res.message ?? "Added to queue for processing");
 }

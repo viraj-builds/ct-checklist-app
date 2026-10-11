@@ -4,7 +4,10 @@ import { auditId, body, handle, HttpError, zPasscode } from "@/lib/server/http";
 import { lookup } from "@/lib/clevertap/web";
 
 // Confirm step: the test user's profile must show Notification Viewed /
-// Clicked after the web push was sent. Silence never fails the item.
+// Clicked *for this send*: only events between this push and the next test
+// push (of either kind) count, and only for a recent, unconfirmed send — so an
+// old test, the other test or a campaign of your own can't confirm it.
+// Silence never fails the item.
 export const maxDuration = 60;
 
 const Confirm = z.object({
@@ -13,7 +16,8 @@ const Confirm = z.object({
   kind: z.enum(["push", "deeplink"]),
 });
 
-const SKEW_MS = 60_000;
+const SKEW_MS = 5_000; // both timestamps come from servers; allow a little drift
+const MAX_AGE_MS = 30 * 60_000;
 
 export const POST = handle(async (req, ctx: RouteContext<"/api/audits/[id]/web-push/confirm">, user) => {
   const id = auditId((await ctx.params).id);
@@ -21,12 +25,21 @@ export const POST = handle(async (req, ctx: RouteContext<"/api/audits/[id]/web-p
   const audit = await getAuditFor(id, user);
   const test = audit.api?.web?.tests?.[kind];
   if (!audit.api || !test) throw new HttpError(409, "Send a test web push first.");
+  if (test.status === "failed") throw new HttpError(409, "That push wasn't sent — send a new one.");
+  if (test.status === "confirmed") return Response.json({ test, user: { webPushToken: audit.api.web?.user?.webPushToken ?? true } });
+  if (Date.now() - test.sentAt > MAX_AGE_MS) throw new HttpError(409, "This test push was sent more than 30 minutes ago — send a new one.");
   if (!audit.accountId || !audit.region) throw new HttpError(400, "Audit has no Account ID / region.");
   await assertActionQuota(user, id, "test-push-confirm", 60);
 
   const profile = await lookup({ accountId: audit.accountId, passcode, region: audit.region }, identity.includes("@") ? "email" : "identity", identity);
   if (!profile.found) throw new HttpError(404, "No CleverTap profile with that identity.");
-  const after = (name: string) => (profile.events[name]?.lastSeen ?? 0) >= test.sentAt - SKEW_MS;
+  // a later test push (either kind) closes this one's window
+  const other = audit.api.web?.tests?.[kind === "push" ? "deeplink" : "push"];
+  const until = other && other.sentAt > test.sentAt ? other.sentAt : test.sentAt + MAX_AGE_MS;
+  const after = (name: string) => {
+    const t = profile.events[name]?.lastSeen ?? 0;
+    return t >= test.sentAt - SKEW_MS && t < until;
+  };
   const viewed = after("Notification Viewed");
   test.clicked = after("Notification Clicked");
   test.status = viewed || test.clicked ? "confirmed" : "not-confirmed";

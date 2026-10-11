@@ -116,10 +116,12 @@ export function WebLab({ audit, visible }: { audit: Audit; visible: boolean }) {
 
       {/* ---- credentials ---- */}
       <Card className="p-6">
-        <h3 className="text-lg font-bold">CleverTap passcode and test user</h3>
-        <p className="mt-1 text-sm text-muted">Kept in this tab only — a reload forgets them.</p>
+        <h3 className="text-lg font-bold">Passcode and test account</h3>
+        <p className="mt-1 text-sm text-muted">
+          Kept in this tab only — a reload forgets them, and the password is never stored. We type the test account into your site&apos;s login page for you.
+        </p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <Labeled label="Passcode" htmlFor="wl-passcode">
+          <Labeled label="CleverTap passcode" htmlFor="wl-passcode">
             <input
               id="wl-passcode"
               type="password"
@@ -136,10 +138,33 @@ export function WebLab({ audit, visible }: { audit: Audit; visible: boolean }) {
             <input id="wl-identity" value={identity} onChange={(e) => setIdentity(e.target.value)} placeholder="test.user@yourstore.com" className="input" />
           </Labeled>
         </div>
+        <div className="mt-6 border-t pt-5 text-sm font-bold text-text-2">Test account on your website</div>
+        <div className="mt-3 grid gap-4 sm:grid-cols-3">
+          <Labeled label="Login" htmlFor="wl-user">
+            <input id="wl-user" autoComplete="off" data-1p-ignore value={user} onChange={(e) => setUser(e.target.value)} placeholder="Email, phone or username" className="input" />
+          </Labeled>
+          <Labeled label="Password" htmlFor="wl-pass">
+            <input
+              id="wl-pass"
+              type="password"
+              autoComplete="new-password"
+              data-1p-ignore
+              data-lpignore="true"
+              value={pass}
+              onChange={(e) => setPass(e.target.value)}
+              placeholder="If your site uses one"
+              className="input"
+            />
+          </Labeled>
+          <Labeled label="Login page" htmlFor="wl-url">
+            <input id="wl-url" value={loginUrl} onChange={(e) => setLoginUrl(e.target.value)} placeholder="/login (optional)" className="input font-mono" />
+          </Labeled>
+        </div>
+
       </Card>
 
       {/* ---- live session in the user's own Chrome ---- */}
-      <LiveSession audit={audit} passcode={passcode} link={link} onIdentity={setIdentity} />
+      <LiveSession audit={audit} passcode={passcode} link={link} onIdentity={setIdentity} login={{ username: user.trim(), password: pass, url: loginUrl.trim() || undefined }} />
 
       {/* ---- website check ---- */}
       <Card className="p-6">
@@ -157,27 +182,6 @@ export function WebLab({ audit, visible }: { audit: Audit; visible: boolean }) {
           <Button icon="refresh" loading={busy === "crawl"} disabled={!!busy && busy !== "crawl"} onClick={recheckSite}>
             {scan ? "Check again" : "Check my website"}
           </Button>
-        </div>
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
-          <Labeled label="Website login (test account)" htmlFor="wl-user">
-            <input id="wl-user" autoComplete="off" data-1p-ignore value={user} onChange={(e) => setUser(e.target.value)} placeholder="Email or username" className="input" />
-          </Labeled>
-          <Labeled label="Password" htmlFor="wl-pass">
-            <input
-              id="wl-pass"
-              type="password"
-              autoComplete="new-password"
-              data-1p-ignore
-              data-lpignore="true"
-              value={pass}
-              onChange={(e) => setPass(e.target.value)}
-              placeholder="Never stored"
-              className="input"
-            />
-          </Labeled>
-          <Labeled label="Login page (optional)" htmlFor="wl-url">
-            <input id="wl-url" value={loginUrl} onChange={(e) => setLoginUrl(e.target.value)} placeholder="/login" className="input font-mono" />
-          </Labeled>
         </div>
         {scan && <ScanFacts audit={audit} />}
       </Card>
@@ -296,6 +300,9 @@ function PushRow({
   onConfirm: () => void;
 }) {
   const st = test?.status;
+  const sent = test ? new Date(test.sentAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+  // Only a send that's still waiting can be checked; a confirmed or failed one needs a new Send.
+  const canCheck = !!test && (st === "sent" || st === "not-confirmed");
   return (
     <div className="flex flex-wrap items-center gap-3">
       <StatusMark status={st === "confirmed" ? "pass" : st === "failed" ? "fail" : st ? "manual" : "todo"} size={24} />
@@ -305,18 +312,18 @@ function PushRow({
           {!test
             ? "Not sent yet"
             : st === "confirmed"
-              ? `Confirmed — ${test.clicked ? "clicked" : "viewed"}`
+              ? `Sent ${sent} · confirmed — ${test.clicked ? "clicked" : "viewed"}. Send again to re-test.`
               : st === "failed"
                 ? test.message
                 : st === "not-confirmed"
-                  ? "Sent — not recorded yet"
-                  : `Sent ${new Date(test.sentAt).toLocaleTimeString()}`}
+                  ? `Sent ${sent} · not recorded yet — wait a minute and check again`
+                  : `Sent ${sent} · waiting — press Check delivery once it shows`}
         </div>
       </div>
       <Button size="sm" variant="secondary" icon="bell" loading={sending} disabled={disabled} onClick={onSend}>
         Send
       </Button>
-      <Button size="sm" variant="outline" icon="check" loading={checking} disabled={disabled || !test || st === "failed"} onClick={onConfirm}>
+      <Button size="sm" variant="outline" icon="check" loading={checking} disabled={disabled || !canCheck} onClick={onConfirm}>
         Check delivery
       </Button>
     </div>
@@ -326,7 +333,7 @@ function PushRow({
 function Labeled({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) {
   return (
     <div>
-      <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-bold">
+      <label htmlFor={htmlFor} className="mb-1.5 block truncate text-sm font-bold">
         {label}
       </label>
       {children}

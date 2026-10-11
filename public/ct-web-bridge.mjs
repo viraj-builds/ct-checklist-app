@@ -8,7 +8,7 @@
 // watches CleverTap's service worker, so a test web push is detected the moment
 // it arrives and when you click it — no "check delivery" needed.
 //
-//   node ct-web-bridge.mjs [--origin https://your-audit-site] [--port 47813]
+//   node ct-web-bridge.mjs [--origin https://your-audit-site] [--port 47813] [--profile <dir>]
 //
 // Safety:
 //   - listens on 127.0.0.1 only; only the audit site's origin may call it, and
@@ -34,8 +34,8 @@ const flag = (name, def) => {
 const PORT = Number(flag("--port", "47813"));
 const ORIGINS = new Set(["http://localhost:3000", ...flag("--origin", "").split(",").filter(Boolean)].map((o) => o.replace(/\/$/, "")));
 const TOKEN = randomBytes(12).toString("hex");
-const HELPER_VERSION = 1; // lib/web/live.ts WEB_HELPER_MIN_VERSION
-const PROFILE_DIR = join(homedir() || tmpdir(), ".ct-audit-chrome");
+const HELPER_VERSION = 3; // lib/web/live.ts WEB_HELPER_MIN_VERSION
+const PROFILE_DIR = flag("--profile", join(homedir() || tmpdir(), ".ct-audit-chrome"));
 const ANDROID_PORT = 9333;
 const CT_HOST = /(^|\.)(clevertap-prod\.com|wzrkt\.com)$/i;
 
@@ -74,11 +74,35 @@ const HOOK = `(() => {
   setInterval(() => { wrap(cur); wrap(window.wizrocket); }, 200);
 })();`;
 
+// Looks at whatever login UI is on the page, so the audit page can tell the user
+// exactly what's needed: we can fill it, or they must type a code / solve a
+// captcha / use Google sign-in themselves. Shared by STATE and FILL.
+const HINTS = `const visible = (e) => { const r = e.getBoundingClientRect(), s = getComputedStyle(e); return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none" && !e.disabled; };
+  const meta = (i) => (i.name + " " + i.id + " " + i.autocomplete + " " + i.placeholder + " " + (i.getAttribute("aria-label") || "")).toLowerCase();
+  const loginHints = () => {
+    const inputs = Array.from(document.querySelectorAll("input")).filter(visible);
+    const password = inputs.some((i) => i.type === "password");
+    const boxes = inputs.filter((i) => i.maxLength === 1 && /text|tel|number|^$/.test(i.type));
+    const otp = inputs.some((i) => i.autocomplete === "one-time-code" || /otp|one.?time|verification|verify|passcode|\\bcode\\b|\\bpin\\b/.test(meta(i))) || boxes.length >= 4;
+    const email = inputs.some((i) => i.type === "email" || /email|user|login|account/.test(meta(i)));
+    const phone = inputs.some((i) => i.type === "tel" || /phone|mobile|msisdn/.test(meta(i)));
+    const captcha = !!document.querySelector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="turnstile"], iframe[src*="captcha"], .g-recaptcha, .h-captcha, .cf-turnstile, [data-sitekey]');
+    const social = Array.from(document.querySelectorAll('button, a, [role="button"]')).filter(visible)
+      .map((e) => (e.innerText || e.getAttribute("aria-label") || "").trim())
+      .filter((t) => t.length < 40 && /\\b(google|apple|facebook|microsoft|github|linkedin)\\b/i.test(t) && /(continue|sign|log|with|^google$|^apple$)/i.test(t))
+      .map((t) => t.replace(/^(continue|sign ?in|log ?in|sign ?up) with /i, ""))
+      .slice(0, 3);
+    const form = otp ? "otp" : password ? "password" : phone ? "phone" : email ? "email-first" : social.length ? "social" : "none";
+    return { form, captcha, social };
+  };`;
+
 // Read in the open page every few seconds.
 const STATE = `(async () => {
-  const out = { url: location.href, permission: typeof Notification === "undefined" ? undefined : Notification.permission, subscribed: false, sw: undefined, ctId: undefined, identified: false, shown: [] };
+  ${HINTS}
+  const out = { url: location.href, permission: typeof Notification === "undefined" ? undefined : Notification.permission, subscribed: false, sw: undefined, ctId: undefined, identified: false, shown: [], login: undefined };
   try { out.ctId = window.clevertap && window.clevertap.getCleverTapID ? window.clevertap.getCleverTapID() : undefined; } catch (e) {}
   try { const k = localStorage.getItem("WZRK_K"); out.identified = !!k && k !== "{}" && k.length > 4; } catch (e) {}
+  try { out.login = loginHints(); } catch (e) {}
   try {
     const regs = navigator.serviceWorker ? await navigator.serviceWorker.getRegistrations() : [];
     for (const r of regs) {
@@ -89,6 +113,98 @@ const STATE = `(async () => {
     }
   } catch (e) {}
   return out;
+})()`;
+
+// Fills the site's login form in the open tab (values set the way React / Vue
+// notice them) and submits it. Works through email-first and phone-first forms;
+// stops and says what the user must do for codes (OTP), captchas or Google /
+// Apple sign-in. `needs` tells the audit page that the user has to act.
+const FILL = (username, password) => `(async () => {
+  const U = ${JSON.stringify(String(username))}, P = ${JSON.stringify(String(password || ""))};
+  ${HINTS}
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const set = (el, v) => {
+    el.focus();
+    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, "value").set.call(el, v);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    el.blur();
+  };
+  const isPhone = /^\\+?[\\d\\s()-]{7,}$/.test(U);
+  const find = () => {
+    const inputs = Array.from(document.querySelectorAll("input")).filter(visible);
+    const pass = inputs.find((i) => i.type === "password");
+    const scope = (pass && (pass.form || pass.closest("form, [role=dialog], main, section, div"))) || document;
+    const cand = inputs.filter((i) => i !== pass && !["checkbox", "radio", "hidden", "submit", "button", "search"].includes(i.type) && (scope === document || scope.contains(i)));
+    const phoneField = cand.find((i) => i.type === "tel" || /phone|mobile|msisdn/.test(meta(i)));
+    const emailField = cand.find((i) => i.type === "email") || cand.find((i) => /user|email|login|account/.test(meta(i)));
+    const user = (isPhone ? phoneField || emailField : emailField || phoneField) || (pass ? cand.find((i) => ["text", "tel", ""].includes(i.type)) : undefined);
+    const anchor = pass || user;
+    const form = anchor && (anchor.form || anchor.closest("form, [role=dialog]"));
+    const btns = Array.from((form || document).querySelectorAll('button, input[type="submit"], [role="button"]')).filter(visible);
+    const label = (b) => (b.innerText || b.value || b.getAttribute("aria-label") || "").trim();
+    const btn = btns.find((b) => b.type === "submit" && /log|sign|continue|next|submit|go|otp|code/i.test(label(b)))
+      || btns.find((b) => /^(log ?in|sign ?in|continue|next|submit|get otp|send otp|send code)$/i.test(label(b)))
+      || (form ? btns.find((b) => b.type === "submit") : undefined);
+    return { user, pass, form, btn };
+  };
+  const submit = (f) => {
+    if (f.btn) f.btn.click();
+    else if (f.form && f.form.requestSubmit) f.form.requestSubmit();
+  };
+  const siteError = () => Array.from(document.querySelectorAll('[role="alert"], [aria-live], p, span, div'))
+    .filter(visible).map((e) => (e.innerText || "").trim())
+    .find((t) => t && t.length < 160 && !t.includes("\\n") && /invalid|incorrect|wrong|failed|not found|no account|too many|disabled|blocked|auth\\//i.test(t));
+  // after each step: is there something only the user can do?
+  const needs = () => {
+    const h = loginHints();
+    if (h.form === "otp") return { ok: true, needs: "otp", message: "Enter the code (OTP) the site sent you in the test Chrome window — we'll see the login when it goes through." };
+    if (h.captcha) return { ok: true, needs: "captcha", message: "The site shows a captcha. Solve it in the test Chrome window and press the login button there." };
+    return null;
+  };
+
+  let f = find();
+  let h = loginHints();
+  if (!f.user && !f.pass) {
+    if (h.form === "social") return { ok: false, needs: "social", message: "This page only offers " + h.social.join(" / ") + " sign-in. Log in yourself in the test Chrome window — we can't type into Google / Apple pages." };
+    const link = Array.from(document.querySelectorAll("a[href], button")).find((e) => /^\\s*(log ?in|sign ?in|login|my account|account|sign ?up \\/ log ?in)\\s*$/i.test(e.innerText || e.getAttribute("aria-label") || ""));
+    if (!link) return { ok: false, needs: "page", message: "No login form on this page. Enter your Login page (e.g. /login) in the card above, or open it in the test Chrome, then press Fill in test login again." };
+    link.click();
+    await wait(2500);
+    f = find();
+    h = loginHints();
+    if (!f.user && !f.pass) {
+      if (h.form === "social") return { ok: false, needs: "social", message: "The login page only offers " + h.social.join(" / ") + " sign-in. Log in yourself in the test Chrome window." };
+      return { ok: false, needs: "page", message: "Opened the login link, but no login form appeared. Enter your Login page in the card above and try again." };
+    }
+  }
+  if (f.user) set(f.user, U);
+  if (!f.pass) {
+    // email-first / phone-first: submit the first step, then see what comes next
+    if (h.captcha) return { ok: true, needs: "captcha", message: "Filled in the " + (isPhone ? "phone number" : "email") + ". Solve the captcha in the test Chrome window, then continue there." };
+    submit(f);
+    await wait(3000);
+    const err = siteError();
+    if (err) return { ok: false, message: "The site said: " + err };
+    const n = needs();
+    if (n) return n;
+    f = find();
+    if (!f.pass) return { ok: true, needs: "more", message: "Submitted the " + (isPhone ? "phone number" : "email") + ". Finish the next step in the test Chrome window — we'll see the login when it goes through." };
+  }
+  if (!P) return { ok: true, needs: "password", message: "This form wants a password — enter it in the card above, or type it in the test Chrome window." };
+  set(f.pass, P);
+  if (loginHints().captcha) return { ok: true, needs: "captcha", message: "Filled in the login. Solve the captcha in the test Chrome window and press the login button there." };
+  await wait(200);
+  submit(f);
+  await wait(4000);
+  const err = siteError();
+  if (err) return { ok: false, message: "The site said: " + err };
+  const n = needs();
+  if (n) return n;
+  return find().pass
+    ? { ok: true, needs: "more", message: "Submitted. If the site asks for anything else, finish it in the test Chrome window." }
+    : { ok: true, message: "Submitted the test login — watching for onUserLogin." };
 })()`;
 
 /* ------------------------------------------------------------------ */
@@ -195,7 +311,15 @@ async function waitFor(fn, ms, what) {
 async function launchDesktop(fresh) {
   const chrome = findChrome();
   if (!chrome) throw new Error("Google Chrome not found. Install it, or start the helper with CHROME_PATH=/path/to/chrome.");
-  if (fresh) rmSync(PROFILE_DIR, { recursive: true, force: true });
+  if (fresh) {
+    try {
+      rmSync(PROFILE_DIR, { recursive: true, force: true });
+    } catch (e) {
+      if (e.code === "EBUSY" || e.code === "EPERM")
+        throw new Error("The test Chrome from an earlier session is still open. Close that Chrome window (or press Close Chrome), then try again.");
+      throw e;
+    }
+  }
   mkdirSync(PROFILE_DIR, { recursive: true });
   const portFile = join(PROFILE_DIR, "DevToolsActivePort");
   rmSync(portFile, { force: true });
@@ -278,6 +402,37 @@ async function openTab(url) {
   if (u.origin !== session.siteOrigin) throw new Error("Only pages of the website under audit.");
   record("tab", { url: u.href });
   await openHooked(u.href);
+}
+
+function mainPageSession() {
+  const s = session;
+  const pages = [...s.sessions.entries()].filter(([, m]) => m.type === "page" && m.url && m.url.startsWith(s.siteOrigin));
+  return (pages.find(([, m]) => m.targetId === s.mainTarget) ?? pages.at(-1))?.[0];
+}
+
+async function login({ username, password, url }) {
+  if (!session) throw new Error("Open the website first.");
+  if (typeof username !== "string" || !username || username.length > 200 || (password !== undefined && (typeof password !== "string" || password.length > 200)))
+    throw new Error("Enter the test account's email, phone or username (and the password if the site uses one).");
+  if (url) {
+    const u = new URL(url, session.siteOrigin);
+    if (u.origin !== session.siteOrigin) throw new Error("The login page must be on the website under audit.");
+    const sid = mainPageSession();
+    if (!sid) throw new Error("The website tab was closed — open the website again.");
+    await session.cdp.send("Page.navigate", { url: u.href }, sid);
+    await new Promise((r) => setTimeout(r, 3500));
+  }
+  const sid = mainPageSession();
+  if (!sid) throw new Error("The website tab was closed — open the website again.");
+  record("login-fill"); // never the values
+  try {
+    const r = await session.cdp.send("Runtime.evaluate", { expression: FILL(username, password), awaitPromise: true, returnByValue: true, userGesture: true }, sid);
+    return r?.result?.value ?? { ok: false, message: "Couldn't run on the page." };
+  } catch (e) {
+    // the page reloaded after submitting — that's the normal result of a successful login
+    if (/navigated|closed|context was destroyed/i.test(e.message)) return { ok: true, message: "Submitted — the site moved on after login. Watching for onUserLogin." };
+    throw e;
+  }
 }
 
 async function onAttached({ sessionId, targetInfo, waitingForDebugger }) {
@@ -394,10 +549,9 @@ async function pollState() {
   const s = session;
   if (!s || s.cdp.closed) return;
   // the newest page of the site under audit
-  const pages = [...s.sessions.entries()].filter(([, m]) => m.type === "page" && m.url && m.url.startsWith(s.siteOrigin));
-  const main = pages.find(([, m]) => m.targetId === s.mainTarget) ?? pages.at(-1);
+  const main = mainPageSession();
   if (!main) return;
-  const r = await s.cdp.send("Runtime.evaluate", { expression: STATE, awaitPromise: true, returnByValue: true }, main[0]).catch(() => null);
+  const r = await s.cdp.send("Runtime.evaluate", { expression: STATE, awaitPromise: true, returnByValue: true }, main).catch(() => null);
   const v = r?.result?.value;
   if (!v) return;
   const key = JSON.stringify(v);
@@ -477,6 +631,9 @@ const server = http.createServer(async (req, res) => {
       const { url: page } = await readJson(req);
       await openTab(String(page));
       return send(res, 200, { ok: true }, allowed);
+    }
+    if (req.method === "POST" && url.pathname === "/v1/login") {
+      return send(res, 200, await login(await readJson(req)), allowed);
     }
     if (req.method === "POST" && url.pathname === "/v1/close") {
       await stop();

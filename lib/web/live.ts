@@ -9,7 +9,7 @@ import { decodeCtPayload } from "./lz";
 import type { LivePushTest, WebEvent, WebLiveFindings, WebProfilePush } from "./types";
 
 export const WEB_HELPER_URL = "http://127.0.0.1:47813";
-export const WEB_HELPER_MIN_VERSION = 1; // HELPER_VERSION in public/ct-web-bridge.mjs
+export const WEB_HELPER_MIN_VERSION = 3; // HELPER_VERSION in public/ct-web-bridge.mjs
 
 export type LiveEvent = { seq: number; t: number; kind: string; [k: string]: unknown };
 
@@ -54,6 +54,23 @@ export async function webHelperHello(): Promise<{ token: string; version: number
 export const webHelperOpen = (token: string, url: string, device: "desktop" | "android", fresh: boolean) =>
   call<{ ok: boolean; browser?: string }>(token, "/v1/open", { url, device, fresh });
 export const webHelperTab = (token: string, url: string) => call<{ ok: boolean }>(token, "/v1/tab", { url });
+/** What the user must do themselves after we filled what we could. */
+export type LoginNeed = "otp" | "captcha" | "social" | "page" | "password" | "more";
+export type LoginFillResult = { ok: boolean; needs?: LoginNeed; message: string };
+
+export const webHelperLogin = (token: string, login: { username: string; password?: string; url?: string }) =>
+  call<LoginFillResult>(token, "/v1/login", login);
+
+/** The login UI the helper last saw on the open page. */
+export type LoginHints = { form: "otp" | "password" | "phone" | "email-first" | "social" | "none"; captcha: boolean; social: string[] };
+
+export function latestLoginHints(events: LiveEvent[]): LoginHints | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.kind === "state" && e.login && typeof e.login === "object") return e.login as LoginHints;
+  }
+  return undefined;
+}
 export const webHelperClose = (token: string) => call<{ ok: boolean }>(token, "/v1/close", {});
 export const webHelperState = (token: string, since: number) => call<HelperState>(token, `/v1/state?since=${since}`);
 

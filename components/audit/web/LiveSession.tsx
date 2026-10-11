@@ -9,6 +9,10 @@ import type { LivePushTest, WebLiveFindings } from "@/lib/web/types";
 import {
   buildLiveFindings,
   webHelperClose,
+  webHelperLogin,
+  latestLoginHints,
+  type LoginFillResult,
+  type LoginHints,
   webHelperHello,
   webHelperOpen,
   webHelperState,
@@ -33,11 +37,13 @@ export function LiveSession({
   passcode,
   link,
   onIdentity,
+  login,
 }: {
   audit: Audit;
   passcode: string;
   link: string;
   onIdentity: (identity: string) => void;
+  login: { username: string; password: string; url?: string }; // test account on the website (in memory only)
 }) {
   const site = audit.target ?? "";
   const [helper, setHelper] = useState<Helper | null>(null);
@@ -51,6 +57,8 @@ export function LiveSession({
   const [revisitAt, setRevisitAt] = useState<number | undefined>(audit.webLive?.revisit?.at);
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState<{ tone: "ok" | "fail"; text: string } | null>(null);
+  const [fill, setFill] = useState<LoginFillResult | null>(null);
+  const [loginStalled, setLoginStalled] = useState(false); // submitted, but no onUserLogin 25 s later
   const since = useRef(0);
   const lastSaved = useRef("");
 
@@ -183,6 +191,18 @@ export function LiveSession({
       return "Opened the site in a new tab, as a returning visitor.";
     });
 
+  const fillLogin = () =>
+    guard("login", async () => {
+      if (!helper) return;
+      if (!login.username) throw new Error("Enter the test account's email, phone or username in the card above first (password too, if your site uses one).");
+      setLoginStalled(false);
+      const r = await webHelperLogin(helper.token, { username: login.username, password: login.password || undefined, url: login.url });
+      setFill(r);
+      if (!r.ok && !r.needs) throw new Error(r.message);
+      // submitted with nothing left for the user: if the site doesn't identify the user soon, say so
+      if (r.ok && !r.needs) window.setTimeout(() => setLoginStalled(true), 25_000);
+    });
+
   const close = () =>
     guard("close", async () => {
       if (helper) await webHelperClose(helper.token);
@@ -233,6 +253,7 @@ export function LiveSession({
   const L = live;
   const step = (done: boolean | undefined, warn?: boolean) => (done ? "pass" : warn ? "warn" : "todo") as "pass" | "warn" | "todo";
   const loginPush = L?.profiles.find((p) => p.phase === "login" && (p.hasIdentity || p.hasEmail));
+  const loginAction = running && L && !L.login.seen ? loginGuidance(latestLoginHints(events), fill, loginStalled, !!login.username) : null;
   const profileCalls = L?.calls.filter((c) => c.api === "profile").length ?? 0;
 
   return (
@@ -267,6 +288,11 @@ export function LiveSession({
           <input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={fresh} onChange={(e) => setFresh(e.target.checked)} disabled={device === "android"} />
           Start as a brand-new visitor
         </label>
+        <span className="basis-full text-[13px] text-muted">
+          {fresh
+            ? "Clears the test Chrome (cookies, CleverTap ID, notification permission) so the site sees a first-time visitor — checks the anonymous profile, UTM and the permission prompt. Recommended for the first run."
+            : "Keeps the test Chrome as it was — you stay logged in and notifications stay allowed. Handy when re-running push tests."}
+        </span>
         <Button icon="globe" loading={busy === "open"} disabled={!!busy && busy !== "open"} onClick={open}>
           {running ? "Open again" : "Open my website"}
         </Button>
@@ -304,7 +330,21 @@ export function LiveSession({
                 ? `onUserLogin sent ${loginPush.keys.join(", ")}${loginPush.phone ? ` · phone ${loginPush.phone} ${loginPush.phoneValid ? "✓ +country code" : "✗ needs +country code"}` : " · no phone"}${loginPush.issues.length ? ` · ⚠ ${loginPush.issues.join("; ")}` : ""}`
                 : L.login.seen
                   ? "Logged in."
-                  : "OTP, Google, captcha — all fine. We watch for onUserLogin."
+                  : "Press Fill in test login, or log in yourself in the test Chrome. It ticks as soon as the site sends onUserLogin."
+            }
+            notice={
+              loginAction && (
+                <Notice tone={loginAction.act ? "warn" : "info"} title={loginAction.act ? "Action needed in the test Chrome" : undefined} className="mt-2">
+                  {loginAction.text}
+                </Notice>
+              )
+            }
+            action={
+              !L.login.seen && (
+                <Button size="sm" variant="secondary" icon="key" loading={busy === "login"} disabled={!running || (!!busy && busy !== "login")} onClick={fillLogin}>
+                  Fill in test login
+                </Button>
+              )
             }
           />
           <Step
@@ -393,15 +433,41 @@ function Header() {
   );
 }
 
-function Step({ mark, title, text, action }: { mark: "pass" | "warn" | "todo"; title: string; text: string; action?: React.ReactNode }) {
+function Step({ mark, title, text, action, notice }: { mark: "pass" | "warn" | "todo"; title: string; text: string; action?: React.ReactNode; notice?: React.ReactNode }) {
   return (
     <li className="flex flex-wrap items-start gap-3">
       <StatusMark status={mark} size={24} />
       <div className="min-w-0 flex-1 basis-64">
         <div className="font-bold">{title}</div>
         <div className="break-words text-sm text-text-2">{text}</div>
+        {notice}
       </div>
       {action}
     </li>
   );
+}
+
+/**
+ * What the user should do next on their login page, from what the helper sees
+ * there right now and what happened when we filled it. `act` = the user must do
+ * something themselves in the test Chrome.
+ */
+function loginGuidance(h: LoginHints | undefined, fill: LoginFillResult | null, stalled: boolean, haveLogin: boolean): { act: boolean; text: string } | null {
+  if (stalled)
+    return {
+      act: true,
+      text: "We submitted the login 25 s ago and the site still hasn't sent onUserLogin. If the test Chrome shows you logged in, the site isn't identifying users to CleverTap — call clevertap.onUserLogin.push({Site: {Identity, Email}}) after login. If it doesn't, check the page there.",
+    };
+  // the page itself is the most up-to-date signal
+  if (h?.form === "otp") return { act: true, text: "The page is asking for a code (OTP). Type the code you received into the test Chrome — we'll see the login when it goes through." };
+  if (h?.captcha) return { act: true, text: "The page has a captcha. Solve it in the test Chrome and press the site's login button there." };
+  if (fill?.needs) return { act: true, text: fill.message };
+  if (h?.form === "social")
+    return { act: true, text: `This page only offers ${h.social.join(" / ")} sign-in. Log in yourself in the test Chrome — we can't type into Google / Apple pages.` };
+  if (h && h.form !== "none")
+    return haveLogin
+      ? { act: false, text: `Login form found (${h.form === "password" ? "email / username + password" : h.form === "phone" ? "phone number" : "email first, then the next step"}). Press Fill in test login.` }
+      : { act: true, text: "Enter the test account above and press Fill in test login — or just log in yourself in the test Chrome." };
+  if (h?.form === "none" && !fill) return { act: false, text: "No login form on this page yet. Press Fill in test login (we look for the site's Log in link), set the Login page above, or open it yourself in the test Chrome." };
+  return null;
 }

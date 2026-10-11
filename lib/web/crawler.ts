@@ -310,7 +310,9 @@ export async function crawlSite(input: CrawlInput): Promise<CrawlResult> {
     if (input.login && left() > 40_000) {
       phase = "login";
       const before = report.ctId;
-      const r = await login(page, input.login, origin, goto, left);
+      const r = await login(page, input.login, origin, goto, left, () =>
+        hookCalls.some((c) => c.phase === "login" && (c.api === "onUserLogin" || c.api === "profile") && !!(str(siteOf(c.args[0])?.Identity) || str(siteOf(c.args[0])?.Email))),
+      );
       report.login = { attempted: true, ok: r.ok, url: r.url ? pathOf(r.url) : undefined, message: r.message };
       await settle(page, 4000);
       const after = await readCtId(page);
@@ -439,6 +441,7 @@ async function login(
   origin: string,
   goto: Goto,
   left: () => number,
+  identified: () => boolean,
 ): Promise<{ ok: boolean; url?: string; message: string }> {
   if (creds.url) {
     const target = new URL(creds.url, origin);
@@ -467,7 +470,15 @@ async function login(
     }
     fields = await tagLoginFields(page);
   }
-  if (!fields.user && !fields.pass) return { ok: false, url: page.url(), message: "Couldn't find a login form. Add the login page URL." };
+  if (!fields.user && !fields.pass) {
+    const h = await loginHints(page);
+    if (h.form === "social") return { ok: false, url: page.url(), message: `This site signs in with ${h.social.join(" / ")} only, which can't be automated. Use Website tests → Live session in your Chrome: you finish that step yourself and everything else is still checked automatically.` };
+    return { ok: false, url: page.url(), message: "Couldn't find a login form. Add the login page URL (e.g. /login)." };
+  }
+  {
+    const h = await loginHints(page);
+    if (h.captcha) return { ok: false, url: page.url(), message: `The login page has a captcha, which can't be automated. Use Website tests → Live session in your Chrome: you finish that step yourself and everything else is still checked automatically.` };
+  }
 
   const startUrl = page.url();
   if (fields.user) await typeInto(page, '[data-ctaudit="user"]', creds.username);
@@ -476,33 +487,88 @@ async function login(
     await submit(page, fields.submit);
     await sleep(3000);
     fields = await tagLoginFields(page);
-    if (!fields.pass) return { ok: false, url: page.url(), message: "No password field appeared after the email step (OTP / magic-link logins can't be automated)." };
+    if (!fields.pass) {
+      const h = await loginHints(page);
+      return {
+        ok: false,
+        url: page.url(),
+        message: h.form === "otp"
+          ? `The site sent a one-time code (OTP) — the automatic check can't receive it. Use Website tests → Live session in your Chrome: you finish that step yourself and everything else is still checked automatically.`
+          : h.captcha
+            ? `A captcha appeared after the first step. Use Website tests → Live session in your Chrome: you finish that step yourself and everything else is still checked automatically.`
+            : "No password field appeared after the email / phone step (magic-link logins can't be automated). Use Website tests → Live session in your Chrome: you finish that step yourself and everything else is still checked automatically.",
+      };
+    }
   }
+  if (!creds.password) return { ok: false, url: page.url(), message: "The login form wants a password — add it to the test login." };
   await typeInto(page, '[data-ctaudit="pass"]', creds.password);
-  await Promise.all([
-    page.waitForNavigation({ timeout: Math.min(12_000, Math.max(3000, left() - 20_000)), waitUntil: "domcontentloaded" }).catch(() => {}),
-    submit(page, fields.submit),
-  ]);
-  await page.waitForNetworkIdle({ idleTime: 800, timeout: 8000 }).catch(() => {});
-  await sleep(2500);
+  await submit(page, fields.submit);
 
-  const after = await page
+  // Logins are often client-side (Firebase / SPA router): no page load to wait
+  // for. Poll until the site identifies the user, leaves the form or shows an error.
+  const deadline = Date.now() + Math.min(20_000, Math.max(5000, left() - 25_000));
+  let last = { pass: true, error: undefined as string | undefined };
+  while (Date.now() < deadline) {
+    await sleep(1000);
+    if (identified()) return { ok: true, url: startUrl, message: "Logged in with the test account." };
+    last = await page
+      .evaluate(() => {
+        const visible = (e: Element) => {
+          const r = (e as HTMLElement).getBoundingClientRect();
+          return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== "hidden";
+        };
+        const pass = Array.from(document.querySelectorAll('input[type="password"]')).some(visible);
+        // any short visible message near the form that reads like an error (sites style these freely)
+        const error = Array.from(document.querySelectorAll<HTMLElement>('[role="alert"], [aria-live], form p, form span, form div, p, span'))
+          .filter(visible)
+          .map((e) => e.innerText.trim())
+          .find((t) => t && t.length < 200 && !t.includes("\n") && /invalid|incorrect|wrong|failed|not found|no account|too many|disabled|denied|captcha|auth\//i.test(t));
+        return { pass, error };
+      })
+      .catch(() => ({ pass: false, error: undefined }));
+    if (last.error) return { ok: false, url: startUrl, message: `The site said: “${last.error}”` };
+    const h = await loginHints(page);
+    if (h.form === "otp") return { ok: false, url: startUrl, message: `The site asked for a one-time code (OTP) after the password. Use Website tests → Live session in your Chrome: you finish that step yourself and everything else is still checked automatically.` };
+    if (h.captcha) return { ok: false, url: startUrl, message: `The site showed a captcha after submitting. Use Website tests → Live session in your Chrome: you finish that step yourself and everything else is still checked automatically.` };
+    if (!last.pass || page.url() !== startUrl) {
+      await page.waitForNetworkIdle({ idleTime: 800, timeout: 6000 }).catch(() => {});
+      return { ok: true, url: startUrl, message: "Logged in with the test account." };
+    }
+  }
+  return {
+    ok: false,
+    url: startUrl,
+    message: "Submitted the login form, but the site didn't log in or show an error within 20 s. Check the test account works in a normal browser; logins with a code (OTP) or captcha need the live session instead.",
+  };
+}
+
+/** What kind of login UI is on the page (same rules as the live helper). */
+async function loginHints(page: Page): Promise<{ form: "otp" | "password" | "phone" | "email-first" | "social" | "none"; captcha: boolean; social: string[] }> {
+  return page
     .evaluate(() => {
       const visible = (e: Element) => {
         const r = (e as HTMLElement).getBoundingClientRect();
-        return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== "hidden";
+        const st = getComputedStyle(e);
+        return r.width > 0 && r.height > 0 && st.visibility !== "hidden" && st.display !== "none";
       };
-      const pass = Array.from(document.querySelectorAll('input[type="password"]')).some(visible);
-      const alert = Array.from(document.querySelectorAll<HTMLElement>('[role="alert"], .error, .alert, [class*="error"], [aria-live]'))
+      const meta = (i: HTMLInputElement) => `${i.name} ${i.id} ${i.autocomplete} ${i.placeholder} ${i.getAttribute("aria-label") ?? ""}`.toLowerCase();
+      const inputs = Array.from(document.querySelectorAll("input")).filter(visible);
+      const password = inputs.some((i) => i.type === "password");
+      const boxes = inputs.filter((i) => i.maxLength === 1 && /text|tel|number|^$/.test(i.type));
+      const otp = inputs.some((i) => i.autocomplete === "one-time-code" || /otp|one.?time|verification|verify|passcode|\bcode\b|\bpin\b/.test(meta(i))) || boxes.length >= 4;
+      const email = inputs.some((i) => i.type === "email" || /email|user|login|account/.test(meta(i)));
+      const phone = inputs.some((i) => i.type === "tel" || /phone|mobile|msisdn/.test(meta(i)));
+      const captcha = !!document.querySelector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="turnstile"], iframe[src*="captcha"], .g-recaptcha, .h-captcha, .cf-turnstile, [data-sitekey]');
+      const social = Array.from(document.querySelectorAll<HTMLElement>('button, a, [role="button"]'))
         .filter(visible)
-        .map((e) => e.innerText.trim())
-        .find((t) => t && t.length < 200 && /invalid|incorrect|wrong|fail|not found|error|denied|captcha/i.test(t));
-      return { pass, alert };
+        .map((e) => (e.innerText || e.getAttribute("aria-label") || "").trim())
+        .filter((t) => t.length < 40 && /\b(google|apple|facebook|microsoft|github|linkedin)\b/i.test(t) && /(continue|sign|log|with|^google$|^apple$)/i.test(t))
+        .map((t) => t.replace(/^(continue|sign ?in|log ?in|sign ?up) with /i, ""))
+        .slice(0, 3);
+      const form = otp ? "otp" : password ? "password" : phone ? "phone" : email ? "email-first" : social.length ? "social" : "none";
+      return { form: form as "otp" | "password" | "phone" | "email-first" | "social" | "none", captcha, social };
     })
-    .catch(() => ({ pass: true, alert: undefined as string | undefined }));
-  if (after.alert) return { ok: false, url: startUrl, message: `The site said: “${after.alert}”` };
-  if (after.pass && page.url() === startUrl) return { ok: false, url: startUrl, message: "Still on the login form after submitting — check the test login, or the form needs a captcha." };
-  return { ok: true, url: startUrl, message: "Logged in with the test account." };
+    .catch(() => ({ form: "none" as const, captcha: false, social: [] as string[] }));
 }
 
 async function tagLoginFields(page: Page): Promise<{ user: boolean; pass: boolean; submit: boolean }> {

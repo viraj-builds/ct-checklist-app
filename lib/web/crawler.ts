@@ -130,7 +130,10 @@ export async function crawlSite(input: CrawlInput): Promise<CrawlResult> {
 
   const browser: Browser = await launchBrowser();
   try {
-    const ctx: BrowserContext = await browser.createBrowserContext();
+    // The default context, not a new one: the serverless Chromium (single-process)
+    // crashes with "Target closed" when asked for a second context. Each check
+    // launches and closes its own browser, so this is still isolated per run.
+    const ctx: BrowserContext = browser.defaultBrowserContext();
 
     const setupPage = async (page: Page) => {
       await page.setUserAgent(UA);
@@ -331,8 +334,10 @@ export async function crawlSite(input: CrawlInput): Promise<CrawlResult> {
     await ctx.overridePermissions(origin, ["notifications"]).catch(() => {});
     if (left() > 25_000) {
       phase = "revisit";
-      const p2 = await ctx.newPage();
-      await setupPage(p2);
+      // Same tab (one tab keeps single-process Chromium stable). A new tab has an
+      // empty sessionStorage but keeps cookies / localStorage — clear it to match.
+      const p2 = page;
+      await p2.evaluate(() => sessionStorage.clear()).catch(() => {});
       const callsBefore = hookCalls.length;
       const netBefore = netProfiles.length;
       await goto(p2, input.url.href, 6000);
@@ -400,7 +405,6 @@ export async function crawlSite(input: CrawlInput): Promise<CrawlResult> {
         clevertap: sw.status === 200 && looksJs && /sw_webpush|clevertap|wzrk|wizrocket/i.test(sw.text),
         imports: sw.text.match(/importScripts\(\s*['"]([^'"]+)['"]/)?.[1],
       };
-      await p2.close().catch(() => {});
     }
 
     /* ---------------- results ---------------- */

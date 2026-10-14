@@ -54,6 +54,9 @@ export function LiveSession({
   const [startedAt, setStartedAt] = useState<number>(audit.webLive?.startedAt ?? 0);
   const [events, setEvents] = useState<LiveEvent[]>([]);
   const [tests, setTests] = useState<Partial<Record<Kind, LivePushTest>>>(audit.webLive?.push.tests ?? {});
+  // CleverTap's own record of each test push (Notification Viewed / Clicked on the
+  // test user) — catches a push that was shown in another browser of the same user.
+  const [apiSeen, setApiSeen] = useState<Partial<Record<Kind, { sentAt: number; clicked: boolean }>>>({});
   const [revisitAt, setRevisitAt] = useState<number | undefined>(audit.webLive?.revisit?.at);
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState<{ tone: "ok" | "fail"; text: string } | null>(null);
@@ -155,6 +158,36 @@ export function LiveSession({
     return () => window.clearTimeout(t);
   }, [built, audit.id]);
 
+  // Ask CleverTap every 15 s (for 3 minutes) whether the test user viewed / clicked
+  // the push — no "check delivery" button needed, and it works even when the push
+  // was shown in another browser of this user.
+  useEffect(() => {
+    if (!passcode || !identity) return;
+    const waiting = (["push", "deeplink"] as const).filter((k) => {
+      const t = tests[k];
+      if (!t) return false;
+      const seen = apiSeen[k];
+      return !(seen && seen.sentAt === t.sentAt && (seen.clicked || k === "push"));
+    });
+    if (!waiting.length) return;
+    const timer = window.setInterval(async () => {
+      for (const k of waiting) {
+        const t = tests[k]!;
+        if (Date.now() - t.sentAt > 180_000) continue;
+        try {
+          const r = await api<{ test: TestPushRecord }>(`/api/audits/${audit.id}/web-push/confirm`, {
+            method: "POST",
+            body: JSON.stringify({ passcode, identity, kind: k }),
+          });
+          if (r.test.status === "confirmed" && r.test.sentAt === t.sentAt) setApiSeen((a) => ({ ...a, [k]: { sentAt: t.sentAt, clicked: !!r.test.clicked } }));
+        } catch {
+          /* not recorded yet / rate-limited — try again next round */
+        }
+      }
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [tests, apiSeen, passcode, identity, audit.id]);
+
   const guard = useCallback(async (name: string, fn: () => Promise<string | void>) => {
     setBusy(name);
     setMsg(null);
@@ -213,12 +246,21 @@ export function LiveSession({
     guard(kind, async () => {
       if (!passcode) throw new Error("Enter your CleverTap passcode above first.");
       if (!identity) throw new Error("Log in on the site in the test Chrome first — we send the push to that user.");
+      // CleverTap sends to every browser this user allowed. Unless the test Chrome is
+      // one of them, the push only shows up elsewhere and we can't watch it here.
+      if (!live?.push.subscribed)
+        throw new Error(
+          live?.push.permission === "denied"
+            ? "Notifications are blocked in the test Chrome. Click the lock icon in its address bar → Notifications → Allow, reload, then send again."
+            : "The test Chrome isn't subscribed to push yet. In the test Chrome window click Allow on the site's prompt (and Chrome's), wait for “Allow notifications” to tick, then send.",
+        );
       const r = await api<{ test: TestPushRecord }>(`/api/audits/${audit.id}/web-push`, {
         method: "POST",
         body: JSON.stringify({ passcode, identity, ...(kind === "deeplink" ? { deepLink: link.trim() } : {}) }),
       });
       if (r.test.status === "failed") throw new Error(r.test.message ?? "CleverTap rejected the web push.");
       setTests((t) => ({ ...t, [kind]: { sentAt: r.test.sentAt, deepLink: r.test.deepLink } }));
+      setApiSeen((a) => ({ ...a, [kind]: undefined }));
       return kind === "deeplink" ? "Sent. Click the notification when it shows — we'll see which page opens." : "Sent. We're watching Chrome for it…";
     });
 
@@ -375,9 +417,9 @@ export function LiveSession({
             }
           />
           <Step
-            mark={step(!!tests.push && !!L.push.tests.push?.receivedAt)}
+            mark={step(!!tests.push && (!!L.push.tests.push?.receivedAt || apiSeen.push?.sentAt === tests.push.sentAt))}
             title="Test push — detected automatically"
-            text={pushText(L.push.tests.push)}
+            text={pushText(L.push.tests.push, false, apiSeen.push)}
             action={
               <Button size="sm" variant="secondary" icon="bell" loading={busy === "push"} disabled={!running || (!!busy && busy !== "push")} onClick={() => sendPush("push")}>
                 Send test push
@@ -385,9 +427,9 @@ export function LiveSession({
             }
           />
           <Step
-            mark={step(!!L.push.tests.deeplink?.clickedAt && !!L.push.tests.deeplink.landedUrl)}
+            mark={step(!!L.push.tests.deeplink?.clickedAt && !!L.push.tests.deeplink.landedUrl, !L.push.tests.deeplink?.clickedAt && !!apiSeen.deeplink?.clicked)}
             title="Push with a link — click it"
-            text={pushText(L.push.tests.deeplink, true)}
+            text={pushText(L.push.tests.deeplink, true, apiSeen.deeplink)}
             action={
               <Button
                 size="sm"
@@ -407,13 +449,21 @@ export function LiveSession({
   );
 }
 
-function pushText(t?: LivePushTest, link = false) {
-  if (!t) return link ? "Uses the link below. Click the notification when it shows; we see which page opens." : "Sent to the logged-in user; we spot it arriving in Chrome.";
+function pushText(t?: LivePushTest, link = false, api?: { sentAt: number; clicked: boolean }) {
+  if (!t) return link ? "Uses the link below. Click the notification in the test Chrome; we see which page opens." : "Sent to the logged-in user; we spot it arriving in the test Chrome.";
   const s = (at?: number) => (at ? `${Math.max(1, Math.round((at - t.sentAt) / 1000))} s` : "");
+  const fromApi = api && api.sentAt === t.sentAt ? api : undefined;
   if (t.clickedAt) return `Clicked after ${s(t.clickedAt)} → opened ${t.landedUrl ?? "nothing"}${t.deepLink ? ` (link: ${t.deepLink})` : ""}`;
-  if (t.receivedAt || t.shownAt) return `Arrived in Chrome after ${s(t.receivedAt ?? t.shownAt)}${t.viewedAt ? " · Notification Viewed reported" : ""}${link ? " — now click it." : ""}`;
+  if (t.receivedAt || t.shownAt)
+    return `Arrived in the test Chrome after ${s(t.receivedAt ?? t.shownAt)}${t.viewedAt ? " · Notification Viewed reported" : ""}${link ? " — now click the notification." : ""}`;
+  if (fromApi)
+    return fromApi.clicked
+      ? "CleverTap recorded a click — but in another browser / device of this user, not the test Chrome, so we couldn't see which page opened. Click it in the test Chrome next time (or tick it yourself)."
+      : "Delivered — CleverTap recorded Notification Viewed, but it was shown in another browser / device of this user, not the test Chrome. Close that one's notification and watch the test Chrome window.";
   const waited = Math.round((Date.now() - t.sentAt) / 1000);
-  return waited > 120 ? "Not received after 2 minutes — is the test Chrome subscribed and logged in as this user?" : `Sent ${waited} s ago — watching for it…`;
+  return waited > 120
+    ? "Nothing in the test Chrome after 2 minutes and CleverTap hasn't recorded it either. Check the test Chrome is still subscribed (Allow notifications ticked) and logged in as this user."
+    : `Sent ${waited} s ago — watching the test Chrome and CleverTap for it…`;
 }
 
 function Header() {

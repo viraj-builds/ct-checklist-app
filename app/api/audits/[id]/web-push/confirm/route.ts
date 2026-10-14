@@ -42,6 +42,16 @@ export const POST = handle(async (req, ctx: RouteContext<"/api/audits/[id]/web-p
   };
   const viewed = after("Notification Viewed");
   test.clicked = after("Notification Clicked");
+  // Activity only after the *next* test push: CleverTap keeps just the latest time per
+  // event, so we can't tell which push it belongs to. Say so instead of guessing.
+  const later = (name: string) => (profile.events[name]?.lastSeen ?? 0) >= until;
+  if (!viewed && !test.clicked && other && other.sentAt > test.sentAt && (later("Notification Viewed") || later("Notification Clicked"))) {
+    const at = new Date(other.sentAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+    throw new HttpError(
+      409,
+      `Another test push went to this user after this one (${at} UTC), so CleverTap can't tell which one was viewed or clicked. Send this one again and check it before sending the other — or use the Live session, which sees each push separately.`,
+    );
+  }
   test.status = viewed || test.clicked ? "confirmed" : "not-confirmed";
   if (test.status === "confirmed") test.confirmedAt = Date.now();
 

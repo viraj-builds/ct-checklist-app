@@ -439,6 +439,12 @@ async function onAttached({ sessionId, targetInfo, waitingForDebugger }) {
   const s = session;
   if (!s) return;
   const send = (m, p) => s.cdp.send(m, p, sessionId).catch(() => {});
+  // A service worker is attached both from the browser and from the page; watch it once
+  // (otherwise every push is reported twice).
+  if (targetInfo.type === "service_worker" && [...s.sessions.values()].some((m) => m.targetId === targetInfo.targetId)) {
+    if (waitingForDebugger) await send("Runtime.runIfWaitingForDebugger");
+    return;
+  }
   s.sessions.set(sessionId, { type: targetInfo.type, targetId: targetInfo.targetId, url: targetInfo.url });
   try {
     if (targetInfo.type === "page") {

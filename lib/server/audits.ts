@@ -20,6 +20,7 @@ import type { SessionUser } from "./auth";
 // ---------------------------------------------------------------------------
 
 export interface AuditInputs {
+  consent?: import("../consent").Consent;
   criticalEvents?: string[];
   expectApi?: boolean; // the user gave a passcode, so a verify step will follow
 }
@@ -100,6 +101,7 @@ function toAudit(row: AuditRow, full: boolean): Audit {
     fileName: row.file_name ?? undefined,
     fileSize: row.file_size ?? undefined,
     criticalEvents: row.inputs?.criticalEvents ?? [],
+    consent: row.inputs?.consent,
     results,
     ...(full
       ? row.platform === "web"
@@ -245,6 +247,28 @@ export async function setCriticalEvents(id: string, events: string[]) {
     .eq("id", id);
   if (error) fail(error, "save critical events");
   await recompute(id);
+}
+
+/**
+ * Routes that save data captured from a test device, website or browser call
+ * this: the audit's owner must have accepted the data & privacy notice.
+ */
+export async function assertConsent(id: string) {
+  const { data, error } = await db().from("audits").select("inputs").eq("id", id).maybeSingle();
+  if (error) fail(error, "check consent");
+  if (!(data as { inputs?: AuditInputs } | null)?.inputs?.consent?.dataCapture)
+    throw new HttpError(403, "Accept the data & privacy notice on this audit first (shown at the top of the test steps).");
+}
+
+/** Record the data & privacy consent on an audit (older audits accept it from the report). */
+export async function setConsent(id: string, consent: import("../consent").Consent) {
+  const row = await getRow(id);
+  if (!row) throw new HttpError(404, "Audit not found");
+  const { error } = await db()
+    .from("audits")
+    .update({ inputs: { ...(row.inputs ?? {}), consent } })
+    .eq("id", id);
+  if (error) fail(error, "save consent");
 }
 
 /** Save a static scan report and re-derive results. */

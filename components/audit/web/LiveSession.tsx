@@ -57,6 +57,9 @@ export function LiveSession({
   // CleverTap's own record of each test push (Notification Viewed / Clicked on the
   // test user) — catches a push that was shown in another browser of the same user.
   const [apiSeen, setApiSeen] = useState<Partial<Record<Kind, { sentAt: number; clicked: boolean }>>>({});
+  // Push tests still waiting for an outcome (spinner on their button) — cleared when
+  // the push is seen / clicked, CleverTap confirms it, or after 3 minutes.
+  const [watching, setWatching] = useState<Partial<Record<Kind, number>>>({});
   const [revisitAt, setRevisitAt] = useState<number | undefined>(audit.webLive?.revisit?.at);
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState<{ tone: "ok" | "fail"; text: string } | null>(null);
@@ -188,6 +191,15 @@ export function LiveSession({
     return () => window.clearInterval(timer);
   }, [tests, apiSeen, passcode, identity, audit.id]);
 
+  // a test is still waiting until it has an outcome (or the 3-minute timer clears it)
+  const stillWaiting = (k: Kind) => {
+    const sentAt = watching[k];
+    if (!sentAt) return false;
+    const t = built?.findings.push.tests[k];
+    const seen = apiSeen[k]?.sentAt === sentAt ? apiSeen[k] : undefined;
+    return k === "push" ? !(t?.receivedAt || t?.shownAt || seen) : !(t?.clickedAt || seen?.clicked);
+  };
+
   const guard = useCallback(async (name: string, fn: () => Promise<string | void>) => {
     setBusy(name);
     setMsg(null);
@@ -261,6 +273,8 @@ export function LiveSession({
       if (r.test.status === "failed") throw new Error(r.test.message ?? "CleverTap rejected the web push.");
       setTests((t) => ({ ...t, [kind]: { sentAt: r.test.sentAt, deepLink: r.test.deepLink } }));
       setApiSeen((a) => ({ ...a, [kind]: undefined }));
+      setWatching((w) => ({ ...w, [kind]: r.test.sentAt }));
+      window.setTimeout(() => setWatching((w) => (w[kind] === r.test.sentAt ? { ...w, [kind]: undefined } : w)), 180_000);
       return kind === "deeplink" ? "Sent. Click the notification when it shows — we'll see which page opens." : "Sent. We're watching Chrome for it…";
     });
 
@@ -403,7 +417,7 @@ export function LiveSession({
           <Step mark={step(profileCalls > 0)} title="Update your profile on the site" text={profileCalls ? `profile.push called ${profileCalls}×.` : "Change your name, phone or preferences and save."} />
           <Step
             mark={step(L.events.length > 0, L.events.some((e) => e.issues.length > 0))}
-            title="Do your key actions"
+            title="Trigger your custom events"
             text={L.events.length ? L.events.slice(0, 6).map((e) => `${e.name} ×${e.count}${e.issues.length ? " ⚠" : ""}`).join(" · ") : "View a product, add to cart, search…"}
           />
           <Step
@@ -421,8 +435,8 @@ export function LiveSession({
             title="Test push — detected automatically"
             text={pushText(L.push.tests.push, false, apiSeen.push)}
             action={
-              <Button size="sm" variant="secondary" icon="bell" loading={busy === "push"} disabled={!running || (!!busy && busy !== "push")} onClick={() => sendPush("push")}>
-                Send test push
+              <Button size="sm" variant="secondary" icon="bell" loading={busy === "push" || stillWaiting("push")} disabled={!running || (!!busy && busy !== "push")} onClick={() => sendPush("push")}>
+                {busy === "push" ? "Sending…" : stillWaiting("push") ? "Watching for it…" : "Send test push"}
               </Button>
             }
           />
@@ -435,11 +449,11 @@ export function LiveSession({
                 size="sm"
                 variant="secondary"
                 icon="link"
-                loading={busy === "deeplink"}
+                loading={busy === "deeplink" || stillWaiting("deeplink")}
                 disabled={!running || !/^https:\/\/.+/.test(link.trim()) || (!!busy && busy !== "deeplink")}
                 onClick={() => sendPush("deeplink")}
               >
-                Send push with link
+                {busy === "deeplink" ? "Sending…" : stillWaiting("deeplink") ? "Waiting for your click…" : "Send push with link"}
               </Button>
             }
           />

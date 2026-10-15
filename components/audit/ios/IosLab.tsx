@@ -76,6 +76,16 @@ export function IosLab({ audit, view, onNavigate }: { audit: Audit; view: IosVie
   const saw = useRef(false); // "I see it on my iPhone"
   const where = drv?.where ?? "iPhone";
 
+  // The "tap a push with a link" wait ends with a tap, or after 3 minutes (as on Android).
+  useEffect(() => {
+    if (waiting !== "tap") return;
+    const t = setTimeout(() => {
+      setWaiting("");
+      setMsg({ tone: "err", text: `No tap seen in 3 minutes. Send the push again and tap it on the ${where}.` });
+    }, 3 * 60_000);
+    return () => clearTimeout(t);
+  }, [waiting, where]);
+
   const procs = useMemo(() => {
     const s = new Set<string>();
     if (app?.executable) s.add(app.executable);
@@ -660,7 +670,7 @@ export function IosLab({ audit, view, onNavigate }: { audit: Audit; view: IosVie
                     </Button>
                   }
                 />
-                <Step n="4" current={cur === "d"} title="Your key actions" how="Use the app like a customer: open a product, add to cart, buy… Each action appears here." ok={okD}
+                <Step n="4" current={cur === "d"} title="Your custom events" how="Use the app like a customer: open a product, add to cart, buy… Each action appears here." ok={okD}
                   rows={(ins?.events ?? []).slice(0, 8).map((e) => [e.name, e.issues.length ? `⚠ ${e.issues[0]}` : "✓"])}
                 />
                 <Step n="5" current={cur === "e"} title="Tap a push with a link" how={`We send a push with this link. Tap it on the ${where} (swipe down from the top if the banner is gone) — we check CleverTap opens it.`} ok={okE}
@@ -669,10 +679,15 @@ export function IosLab({ audit, view, onNavigate }: { audit: Audit; view: IosVie
                     <div className="flex w-full flex-col gap-2">
                       <div className="flex w-full flex-wrap gap-2">
                         <input value={url} onChange={(e) => setUrl(e.target.value)} className="input min-w-0 flex-1 basis-64 font-mono" placeholder="https://… or myapp://screen" aria-label="Link to send in the push" />
-                        <Button variant="secondary" icon={waiting === "tap" ? "refresh" : "bell"} loading={waiting === "sending"}
-                          disabled={!active || (!!waiting && waiting !== "tap") || !url.trim() || (linkVia === "clevertap" && !!needCreds)} onClick={sendLink}>
-                          {waiting === "sending" ? "Sending…" : waiting === "tap" ? "Sent — send again" : sc.linkTap ? "Send another" : "Send push"}
+                        <Button variant="secondary" icon="bell" loading={waiting === "sending" || waiting === "tap"}
+                          disabled={!active || !!waiting || !url.trim() || (linkVia === "clevertap" && !!needCreds)} onClick={sendLink}>
+                          {waiting === "sending" ? "Sending…" : waiting === "tap" ? "Waiting for your tap…" : sc.linkTap ? "Send another" : "Send push"}
                         </Button>
+                        {waiting === "tap" && (
+                          <Button variant="ghost" size="sm" onClick={() => setWaiting("")}>
+                            Stop waiting
+                          </Button>
+                        )}
                       </div>
                       {drv.canSimulatePush && <Segmented value={linkVia} onChange={setLinkVia} options={[["simulated", "Simulated"], ["clevertap", "Through CleverTap"]]} small />}
                     </div>
@@ -696,7 +711,7 @@ export function IosLab({ audit, view, onNavigate }: { audit: Audit; view: IosVie
           ) : (
             <div className="space-y-5">
               <Card className="p-6">
-                <p className="text-[15px] text-text-2">Connect your iPhone first. Then do each action shown here — log in, restart, your key actions, a push with a link and an in-app.</p>
+                <p className="text-[15px] text-text-2">Connect your iPhone first. Then do each action shown here — log in, restart, your custom events, a push with a link and an in-app.</p>
                 {onNavigate && (
                   <div className="mt-4">
                     <Button iconRight="arrowRight" onClick={() => onNavigate("setup")}>

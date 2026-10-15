@@ -4,7 +4,7 @@ import { createServerClient } from "@supabase/ssr";
 // Refreshes the Supabase session cookie on every request and sends signed-out
 // visitors to /login. API routes do their own 401 check (lib/server/http.ts).
 
-const PUBLIC_PAGES = ["/login", "/auth/callback", "/checklist", "/faq"];
+const PUBLIC_PAGES = ["/login", "/auth/callback", "/checklist", "/faq", "/privacy"];
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });

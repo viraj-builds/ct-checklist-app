@@ -12,7 +12,7 @@ export const WEB_HOW_TO_CHECK: Record<string, { auto: boolean; how: string }> = 
   "web-t2-phone": { auto: true, how: "Log in with a test user that has a phone number — it must be sent as +<country code><number>." },
   "web-t3-custom-events": {
     auto: true,
-    how: "We follow links but never click buttons. Do your key actions on the site (view a product, add to cart…), then press “Check CleverTap again”.",
+    how: "We follow links but never click buttons. Trigger your custom events on the site (view a product, add to cart…), then press “Check CleverTap again”.",
   },
   "web-t3-web-push": {
     auto: true,

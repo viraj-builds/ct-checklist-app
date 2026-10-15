@@ -20,6 +20,14 @@ const CreateAudit = z.object({
   siteUrl: z.string().trim().min(3).max(500).optional(),
   withApi: z.boolean().default(true),
   criticalEvents: z.array(z.string().trim().min(1).max(120)).max(10).default([]),
+  consent: z.object(
+    {
+      version: z.number().int().min(1),
+      dataCapture: z.literal(true, { error: "Please accept the data & privacy notice." }),
+      screenshots: z.boolean().default(false),
+    },
+    { error: "Please accept the data & privacy notice." },
+  ),
 }).superRefine((v, ctx) => {
   if (v.platform === "web") {
     if (!v.siteUrl) ctx.addIssue({ code: "custom", path: ["siteUrl"], message: "Enter your website address" });
@@ -57,7 +65,7 @@ export const POST = handle(async (req, _ctx, user) => {
       accountId: input.accountId,
       siteUrl: url.href,
       owner: user,
-      inputs: { criticalEvents: input.criticalEvents, expectApi: input.withApi },
+      inputs: { criticalEvents: input.criticalEvents, expectApi: input.withApi, consent: { ...input.consent, dataCapture: true, at: Date.now(), by: user.email } },
     });
     return Response.json({ id }, { status: 201 });
   }
@@ -73,7 +81,7 @@ export const POST = handle(async (req, _ctx, user) => {
     fileName: input.fileName,
     fileSize: input.fileSize,
     owner: user,
-    inputs: { criticalEvents: input.criticalEvents, expectApi: input.withApi },
+    inputs: { criticalEvents: input.criticalEvents, expectApi: input.withApi, consent: { ...input.consent, dataCapture: true, at: Date.now(), by: user.email } },
   });
   const upload = storagePath ? await createUploadUrl(storagePath) : undefined;
   return Response.json({ id, upload: upload && { path: upload.path, url: upload.signedUrl } }, { status: 201 });

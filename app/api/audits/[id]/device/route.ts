@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { assertAccess, recompute, updateAudit } from "@/lib/server/audits";
+import { assertAccess, assertConsent, recompute, updateAudit } from "@/lib/server/audits";
 import { auditId, body, handle } from "@/lib/server/http";
 import type { DeviceFindings } from "@/lib/device/types";
 
@@ -118,6 +118,7 @@ const Findings = z.object({
 export const POST = handle(async (req, ctx: RouteContext<"/api/audits/[id]/device">, user) => {
   const id = auditId((await ctx.params).id);
   await assertAccess(id, user);
+  await assertConsent(id);
   const findings = (await body(req, Findings, 512 * 1024)) as DeviceFindings;
   await updateAudit(id, { device: findings });
   await recompute(id);

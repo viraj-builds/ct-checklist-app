@@ -8,7 +8,7 @@ export type GroupId = "settings" | "install" | "login" | "events" | "push" | "li
 export const GROUPS: { id: GroupId; name: string; desc: string }[] = [
   { id: "install", name: "Install and launch", desc: "First-launch events, SDK setup, push token and location" },
   { id: "login", name: "Login and profiles", desc: "One clean profile for every person" },
-  { id: "events", name: "Events and data", desc: "Your key events, sent in the right format" },
+  { id: "events", name: "Events and data", desc: "Your custom events, sent in the right format" },
   { id: "push", name: "Push notifications", desc: "With the app open, in the background and closed" },
   { id: "links", name: "Deep links and in-app", desc: "Taps land on the right screen" },
   { id: "settings", name: "Dashboard settings", desc: "Switches on your CleverTap dashboard" },

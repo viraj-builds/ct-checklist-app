@@ -64,7 +64,7 @@ const DO = {
   start: "Live device testing → connect the phone; the app is restarted and checked automatically.",
   login: "Live device testing → step 4 “Log in again”: log out and log in on the phone.",
   phone: "Live device testing → step 4 “Log in again”: log in with a phone number.",
-  use: "Live device testing → step 4 “Your key actions”: use the app (open a product, add to cart, buy…).",
+  use: "Live device testing → step 4 “Your custom events”: use the app (open a product, add to cart, buy…).",
   push: "Live device testing → step 3: press Test on any app state.",
   install: "Uninstall the app, install this build, open it once, then press “Check test user” (step 1).",
 };

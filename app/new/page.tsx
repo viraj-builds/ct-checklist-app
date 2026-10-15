@@ -14,6 +14,7 @@ import { scanIosInBrowser } from "@/lib/analyzer/ios/client";
 import { uploadToSignedUrl } from "@/lib/upload";
 import { rememberIdentity, rememberPasscode, rememberWebLogin } from "@/lib/session-secrets";
 import { cx, formatBytes } from "@/lib/format";
+import { ConsentFields, consentBody } from "@/components/audit/Consent";
 
 const PLATFORMS: Platform[] = ["android", "ios", "web"];
 const AVAILABLE: Record<Platform, boolean> = { android: true, ios: true, web: true };
@@ -74,6 +75,8 @@ export default function NewAuditPage() {
   const isWeb = platform === "web";
   const where: ScanWhere = isWeb ? "url" : "browser";
   const [events, setEvents] = useState("");
+  const [consentData, setConsentData] = useState(false);
+  const [consentShots, setConsentShots] = useState(false);
   const [run, setRun] = useState<RunState | null>(null);
 
   const criticalEvents = events
@@ -107,6 +110,7 @@ export default function NewAuditPage() {
           ...(isWeb ? { siteUrl: siteUrl.trim() } : { fileName: file!.name, fileSize: file!.size }),
           withApi,
           criticalEvents,
+          consent: consentBody(consentShots),
         }),
       });
       auditId = created.id;
@@ -300,7 +304,8 @@ export default function NewAuditPage() {
                   setShowPass={setShowLoginPass}
                   events={events}
                   setEvents={setEvents}
-                  canStart={!!siteUrl.trim() && projectValid() && !busy}
+                  canStart={!!siteUrl.trim() && projectValid() && consentData && !busy}
+                  consent={<ConsentFields data={consentData} onData={setConsentData} screenshots={consentShots} onScreenshots={setConsentShots} />}
                   busy={busy}
                   onStart={start}
                 />
@@ -335,7 +340,7 @@ export default function NewAuditPage() {
                   )}
                 </div>
 
-                <Field label="Your key events (optional)" htmlFor="events" hint="The 3–4 custom events that matter most, spelled exactly as in your code. You can change them later.">
+                <Field label="Your custom events (optional)" htmlFor="events" hint="The 3–4 custom events that matter most, spelled exactly as in your code. You can change them later.">
                   <input
                     id="events"
                     value={events}
@@ -345,8 +350,10 @@ export default function NewAuditPage() {
                   />
                 </Field>
 
+                <ConsentFields data={consentData} onData={setConsentData} screenshots={consentShots} onScreenshots={setConsentShots} />
+
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
-                  <Button size="lg" icon="zap" onClick={start} disabled={!file || !projectValid() || busy}>
+                  <Button size="lg" icon="zap" onClick={start} disabled={!file || !projectValid() || !consentData || busy}>
                     {busy ? "Starting…" : "Start audit"}
                   </Button>
                   <span className="text-sm text-muted">Takes about a minute. Your progress is saved as you go.</span>
@@ -637,6 +644,7 @@ function WebTarget(p: {
   events: string;
   setEvents: (v: string) => void;
   canStart: boolean;
+  consent: React.ReactNode;
   busy: boolean;
   onStart: () => void;
 }) {
@@ -722,9 +730,11 @@ function WebTarget(p: {
         </p>
       </div>
 
-      <Field label="Your key events (optional)" htmlFor="events" hint="The 3–4 custom events that matter most, spelled exactly as in your code. You can change them later.">
+      <Field label="Your custom events (optional)" htmlFor="events" hint="The 3–4 custom events that matter most, spelled exactly as in your code. You can change them later.">
         <input id="events" value={p.events} onChange={(e) => p.setEvents(e.target.value)} placeholder="For example Product Viewed, Added To Cart, Charged" className="input" />
       </Field>
+
+      {p.consent}
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
         <Button size="lg" icon="zap" onClick={p.onStart} disabled={!p.canStart}>

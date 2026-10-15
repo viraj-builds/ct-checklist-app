@@ -51,7 +51,7 @@ const DO = {
   start: "Live testing → connect your iPhone (or the Simulator); we restart the app and read its CleverTap logs.",
   login: "Guided checks → “Log in”: log out and log in again in the app.",
   phone: "Guided checks → “Log in”: log in with a user that has a phone number.",
-  use: "Guided checks → “Your key actions”: use the app (open a product, add to cart, buy…).",
+  use: "Guided checks → “Your custom events”: use the app (open a product, add to cart, buy…).",
   push: "Push tests: press Test on any app state.",
   install: "Delete the app from the iPhone (or Simulator), install this build again, open it once, then press “Check test user”.",
 };

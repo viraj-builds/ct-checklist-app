@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getAuditFor, recompute, updateAudit } from "@/lib/server/audits";
+import { assertConsent, getAuditFor, recompute, updateAudit } from "@/lib/server/audits";
 import { auditId, body, handle, HttpError } from "@/lib/server/http";
 import type { WebLiveFindings } from "@/lib/web/types";
 
@@ -51,6 +51,7 @@ export const POST = handle(async (req, ctx: RouteContext<"/api/audits/[id]/web-l
   const id = auditId((await ctx.params).id);
   const live = (await body(req, Live, 512 * 1024)) as unknown as WebLiveFindings;
   const audit = await getAuditFor(id, user);
+  await assertConsent(id);
   if (audit.platform !== "web") throw new HttpError(400, "This audit isn't a website audit.");
   await updateAudit(id, { device: live });
   await recompute(id);

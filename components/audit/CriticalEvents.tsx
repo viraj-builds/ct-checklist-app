@@ -44,7 +44,7 @@ export function CriticalEvents({ audit }: { audit: Audit }) {
       setMsg(
         audit.platform === "web"
           ? "Saved. Do these actions on your site, then Website tests → Check CleverTap again."
-          : "Saved. Now do these actions on the phone under “Your key actions”.",
+          : "Saved. Now do these actions on the phone under “Your custom events”.",
       );
     } catch (e) {
       setMsg((e as Error).message);
@@ -67,10 +67,10 @@ export function CriticalEvents({ audit }: { audit: Audit }) {
 
   return (
     <Card className="p-6">
-      <h3 className="text-lg font-bold">Your key events</h3>
+      <h3 className="text-lg font-bold">Your custom events</h3>
       <p className="mt-1 max-w-[66ch] text-[15px] text-text-2">
         Pick the 3–4 custom events that matter most, such as <i>Product Viewed</i> or <i>Added To Cart</i>. Then do those actions on the phone under
-        “Your key actions” below — we check each one arrives with the right property types. Names must match your code exactly.
+        “Your custom events” below — we check each one arrives with the right property types. Names must match your code exactly.
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -92,7 +92,7 @@ export function CriticalEvents({ audit }: { audit: Audit }) {
             </span>
           );
         })}
-        {list.length === 0 && <span className="text-sm text-muted">No key events chosen yet.</span>}
+        {list.length === 0 && <span className="text-sm text-muted">No custom events chosen yet.</span>}
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">

@@ -13,6 +13,7 @@ const NAV: { href: string; label: string; icon: IconName }[] = [
   { href: "/audits", label: "My audits", icon: "list" },
   { href: "/checklist", label: "What we check", icon: "clipboard" },
   { href: "/faq", label: "Help & fixes", icon: "help" },
+  { href: "/privacy", label: "Privacy", icon: "shield" },
 ];
 
 // Sidebar width: compact icon rail on every page load, drag the right edge to

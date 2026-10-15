@@ -88,6 +88,8 @@ export interface Audit {
   // Website audits: the crawler's report
   webScan?: import("./web/types").WebScanReport;
   webLive?: import("./web/types").WebLiveFindings; // live session in the user's Chrome
+  // data & privacy consent (lib/consent.ts); missing on audits created before it existed
+  consent?: import("./consent").Consent;
 }
 
 export interface FaqEntry {

@@ -189,7 +189,7 @@ export const HOW_TO_CHECK: Record<string, { auto: boolean; how: string }> = {
   "app-t1-sdk-version": { auto: true, how: "Guided checks read the exact SDK version from the SDK's own logs, even when the build is minified." },
   "app-t4-critical-events": {
     auto: true,
-    how: "In Guided checks, “Your key actions”: do the actions that raise each listed event — we check it fires with the right property types.",
+    how: "In Guided checks, “Your custom events”: do the actions that raise each listed event — we check it fires with the right property types.",
   },
   "app-t3-uninstall": { auto: false, how: "Dashboard → Settings → Engage → Uninstall tracking ON. Ticks itself once an App Uninstalled event arrives." },
   "app-t3-session-analytics": { auto: false, how: "Dashboard → Settings → Session analytics ON. CleverTap has no API for this, so tick it after checking." },

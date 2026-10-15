@@ -46,7 +46,7 @@ export function LogSession({
   onSave: (s: LogSessionSave) => Promise<void>;
   autoStart?: boolean; // start listening as soon as the phone is connected
   accountId?: string; // CleverTap account — its log tag is pinned to verbose
-  beforeSteps?: ReactNode; // shown between the Start bar and the steps (e.g. key events)
+  beforeSteps?: ReactNode; // shown between the Start bar and the steps (e.g. custom events)
 }) {
   const [active, setActive] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -408,7 +408,7 @@ export function LogSession({
         <Step
           n="4"
           current={cur === "d"}
-          title="Your key actions"
+          title="Your custom events"
           how="Use the app like a customer: open a product, add to cart, buy… Each action appears here."
           ok={okD}
           rows={customEvents.slice(0, 8).map((e) => [e.name, e.issues.length ? `⚠ ${e.issues[0]}` : "✓"])}
@@ -442,13 +442,18 @@ export function LogSession({
               />
               <Button
                 variant="secondary"
-                icon={waiting === "tap" ? "refresh" : "bell"}
-                loading={waiting === "sending"}
-                disabled={!active || (!!waiting && waiting !== "tap") || !!canSendPush || !url.trim()}
+                icon="bell"
+                loading={waiting === "sending" || waiting === "tap"}
+                disabled={!active || !!waiting || !!canSendPush || !url.trim()}
                 onClick={sendLink}
               >
-                {waiting === "sending" ? "Sending…" : waiting === "tap" ? "Sent — send again" : sc.linkTap ? "Send another" : "Send push"}
+                {waiting === "sending" ? "Sending…" : waiting === "tap" ? "Waiting for your tap…" : sc.linkTap ? "Send another" : "Send push"}
               </Button>
+              {waiting === "tap" && (
+                <Button variant="ghost" size="sm" onClick={() => setWaiting("")}>
+                  Stop waiting
+                </Button>
+              )}
               {canSendPush && <span className="w-full text-sm text-muted">{canSendPush}</span>}
             </div>
           }

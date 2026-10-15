@@ -464,7 +464,7 @@ export function DeviceLab({
             <div className="space-y-5">
               <Card className="p-6">
                 <p className="text-[15px] text-text-2">
-                  Connect your phone first. Then do each action shown here — log in, restart, your key actions, a push with a link and an in-app.
+                  Connect your phone first. Then do each action shown here — log in, restart, your custom events, a push with a link and an in-app.
                 </p>
                 {onNavigate && (
                   <div className="mt-4">

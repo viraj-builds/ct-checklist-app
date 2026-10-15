@@ -263,15 +263,15 @@ const RULES: Record<string, Rule> = {
       });
     if (live.length || apiEv.some((e) => e.androidSampled > 0)) {
       if (missing.length)
-        return res("warn", `${ce.length - missing.length} of ${ce.length} key events seen`, `Custom events arrive, but not seen yet: ${list(missing)}. Do those actions on the site, then press “Check CleverTap again”.`, live.length ? "static+api" : "api", { details });
+        return res("warn", `${ce.length - missing.length} of ${ce.length} listed custom events seen`, `Custom events arrive, but not seen yet: ${list(missing)}. Do those actions on the site, then press “Check CleverTap again”.`, live.length ? "static+api" : "api", { details });
       return res("pass", `${live.length || apiEv.filter((e) => e.androidSampled > 0).length} custom event${live.length === 1 ? "" : "s"} with valid properties`,
         live.length ? `While we browsed the site it sent ${list(live.map((e) => e.name))} with correctly typed properties.` : "Your custom events arrive in CleverTap with correctly typed properties.", live.length ? "static" : "api", { details });
     }
     if (s?.code.eventPush.found || s?.eventNames.length)
-      return res("manual", "In the code — not fired yet", `The site's code sends custom events${s.eventNames.length ? ` (${list(s.eventNames, 6)})` : ""}, but none fired on the pages we opened (we only follow links, we don't click buttons). List your key events and press “Check CleverTap again” after using the site.`, "static", { details: s.code.eventPush.evidence.slice(0, 3) });
+      return res("manual", "In the code — not fired yet", `The site's code sends custom events${s.eventNames.length ? ` (${list(s.eventNames, 6)})` : ""}, but none fired on the pages we opened (we only follow links, we don't click buttons). List your custom events and press “Check CleverTap again” after using the site.`, "static", { details: s.code.eventPush.evidence.slice(0, 3) });
     if (!s) return res("manual", "Not checked", NO_SCAN, "none");
     return res("warn", "No custom events found", "No clevertap.event.push calls in the site's code and none fired while we browsed.", "static", {
-      remediation: 'Track key actions with clevertap.event.push("Product Viewed", {"Product Name": "…", "Price": 59.99}).',
+      remediation: 'Track your custom events with clevertap.event.push("Product Viewed", {"Product Name": "…", "Price": 59.99}).',
     });
   },
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getAuditFor, recompute, updateAudit } from "@/lib/server/audits";
+import { assertConsent, getAuditFor, recompute, updateAudit } from "@/lib/server/audits";
 import { auditId, body, handle, HttpError } from "@/lib/server/http";
 import type { IosDeviceFindings } from "@/lib/device/ios/types";
 
@@ -85,6 +85,7 @@ const Findings = z.object({
 export const POST = handle(async (req, ctx: RouteContext<"/api/audits/[id]/ios-device">, user) => {
   const id = auditId((await ctx.params).id);
   const audit = await getAuditFor(id, user);
+  await assertConsent(id);
   if (audit.platform !== "ios") throw new HttpError(409, "This audit isn't an iOS audit.");
   const findings = (await body(req, Findings, 512 * 1024)) as IosDeviceFindings;
   await updateAudit(id, { device: findings });

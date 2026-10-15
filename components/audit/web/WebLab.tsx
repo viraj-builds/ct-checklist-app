@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, refreshAudit } from "@/lib/store";
 import { rememberIdentity, rememberPasscode, rememberWebLogin, useSecrets } from "@/lib/session-secrets";
 import type { Audit } from "@/lib/types";
@@ -24,6 +24,9 @@ export function WebLab({ audit, visible }: { audit: Audit; visible: boolean }) {
   const [loginUrl, setLoginUrl] = useState(secrets.webLogin?.url ?? "");
   const [link, setLink] = useState(() => (audit.target ? new URL(audit.target).origin + "/" : "https://"));
   const [busy, setBusy] = useState("");
+  // Sends still waiting for CleverTap to record them (spinner on Send); polled every
+  // 15 s for 3 minutes, so pressing Check delivery is optional.
+  const [watch, setWatch] = useState<Partial<Record<"push" | "deeplink", number>>>({});
   const [msg, setMsg] = useState<{ tone: "ok" | "fail"; text: string } | null>(null);
 
   const id = identity.trim();
@@ -86,8 +89,42 @@ export function WebLab({ audit, visible }: { audit: Audit; visible: boolean }) {
         body: JSON.stringify({ passcode, identity: id, ...(withLink ? { deepLink: link.trim() } : {}) }),
       });
       if (r.test.status === "failed") throw new Error(r.test.message ?? "CleverTap rejected the web push.");
-      return withLink ? "Sent. Click the notification when it appears, then press Check delivery." : "Sent. When the notification appears, press Check delivery.";
+      const kind = withLink ? "deeplink" : "push";
+      setWatch((w) => ({ ...w, [kind]: r.test.sentAt }));
+      window.setTimeout(() => setWatch((w) => (w[kind] === r.test.sentAt ? { ...w, [kind]: undefined } : w)), 180_000);
+      return withLink
+        ? "Sent. Click the notification when it appears — we keep checking CleverTap for the click."
+        : "Sent. We keep checking CleverTap until it's recorded — no need to press anything.";
     });
+
+  // poll CleverTap for the sends we're watching
+  useEffect(() => {
+    const kinds = (["push", "deeplink"] as const).filter((k) => watch[k]);
+    if (!kinds.length || !passcode || !id) return;
+    const timer = window.setInterval(async () => {
+      for (const k of kinds) {
+        try {
+          const r = await api<{ test: TestPushRecord }>(`/api/audits/${audit.id}/web-push/confirm`, {
+            method: "POST",
+            body: JSON.stringify({ passcode, identity: id, kind: k }),
+          });
+          const done = r.test.status === "confirmed" && (k === "push" || r.test.clicked);
+          if (done) {
+            setWatch((w) => ({ ...w, [k]: undefined }));
+            setMsg({ tone: "ok", text: r.test.clicked ? "Confirmed — CleverTap recorded the click." : "Confirmed — CleverTap recorded Notification Viewed." });
+          }
+          refreshAudit(audit.id);
+        } catch (e) {
+          // a definite answer (e.g. can't tell two pushes apart) ends the wait
+          if (/can't tell|too old|wasn't sent|No CleverTap profile/i.test((e as Error).message)) {
+            setWatch((w) => ({ ...w, [k]: undefined }));
+            setMsg({ tone: "fail", text: (e as Error).message });
+          }
+        }
+      }
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [watch, passcode, id, audit.id]);
 
   const confirm = (kind: "push" | "deeplink") =>
     guard(`confirm-${kind}`, async () => {
@@ -193,7 +230,7 @@ export function WebLab({ audit, visible }: { audit: Audit; visible: boolean }) {
             <h3 className="text-lg font-bold">Confirm in CleverTap</h3>
             <p className="mt-1 max-w-[62ch] text-sm text-muted">
               Finds the visitor our check created and your test user in CleverTap, and samples your custom events. New data can take a few minutes to show —
-              do your key actions on the site, then check again.
+              trigger your custom events on the site, then check again.
             </p>
           </div>
           <Button variant="secondary" icon="refresh" loading={busy === "verify"} disabled={!passcode || (!!busy && busy !== "verify")} onClick={recheckApi}>
@@ -215,7 +252,7 @@ export function WebLab({ audit, visible }: { audit: Audit; visible: boolean }) {
         <ol className="mt-3 space-y-2 text-[15px] text-text-2">
           <li>1. Open your website in Chrome (not incognito) and log in as the test user.</li>
           <li>2. Click Allow on CleverTap&apos;s prompt and on the browser&apos;s prompt.</li>
-          <li>3. Send a test push here, then press Check delivery once it shows.</li>
+          <li>3. Press Send — we keep checking CleverTap until it&apos;s recorded (up to 3 minutes). For the link push, click the notification.</li>
         </ol>
         {needApi && <p className="mt-3 text-sm text-muted">{needApi}</p>}
         <div className="mt-5 space-y-4">
@@ -223,6 +260,7 @@ export function WebLab({ audit, visible }: { audit: Audit; visible: boolean }) {
             title="Plain test push"
             test={w?.tests?.push}
             sending={busy === "push"}
+            watching={!!watch.push && w?.tests?.push?.sentAt === watch.push}
             checking={busy === "confirm-push"}
             disabled={!!needApi || (!!busy && !busy.endsWith("push"))}
             onSend={() => sendPush(false)}
@@ -237,6 +275,8 @@ export function WebLab({ audit, visible }: { audit: Audit; visible: boolean }) {
                 title="Push with a link"
                 test={w?.tests?.deeplink}
                 sending={busy === "deeplink"}
+                watching={!!watch.deeplink && w?.tests?.deeplink?.sentAt === watch.deeplink}
+                link
                 checking={busy === "confirm-deeplink"}
                 disabled={!!needApi || !/^https:\/\/.+/.test(link.trim()) || (!!busy && !busy.endsWith("deeplink"))}
                 onSend={() => sendPush(true)}
@@ -286,6 +326,8 @@ function PushRow({
   title,
   test,
   sending,
+  watching,
+  link,
   checking,
   disabled,
   onSend,
@@ -294,6 +336,8 @@ function PushRow({
   title: string;
   test?: TestPushRecord;
   sending: boolean;
+  watching?: boolean; // sent, waiting for CleverTap to record it
+  link?: boolean;
   checking: boolean;
   disabled: boolean;
   onSend: () => void;
@@ -302,15 +346,17 @@ function PushRow({
   const st = test?.status;
   const sent = test ? new Date(test.sentAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
   // Only a send that's still waiting can be checked; a confirmed or failed one needs a new Send.
-  const canCheck = !!test && (st === "sent" || st === "not-confirmed");
+  const canCheck = !!test && (st === "sent" || st === "not-confirmed" || (!!link && st === "confirmed" && !test.clicked));
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <StatusMark status={st === "confirmed" ? "pass" : st === "failed" ? "fail" : st ? "manual" : "todo"} size={24} />
+      <StatusMark status={watching ? "busy" : st === "confirmed" ? "pass" : st === "failed" ? "fail" : st ? "manual" : "todo"} size={24} />
       <div className="min-w-0 flex-1 basis-56">
         <div className="font-bold">{title}</div>
         <div className="text-sm text-muted">
           {!test
             ? "Not sent yet"
+            : watching
+              ? `Sent ${sent} · ${link && st === "confirmed" ? "delivered — click the notification" : "waiting for CleverTap to record it"}…`
             : st === "confirmed"
               ? `Sent ${sent} · confirmed — ${test.clicked ? "clicked" : "viewed"}. Send again to re-test.`
               : st === "failed"
@@ -320,8 +366,8 @@ function PushRow({
                   : `Sent ${sent} · waiting — press Check delivery once it shows`}
         </div>
       </div>
-      <Button size="sm" variant="secondary" icon="bell" loading={sending} disabled={disabled} onClick={onSend}>
-        Send
+      <Button size="sm" variant="secondary" icon="bell" loading={sending || watching} disabled={disabled} onClick={onSend}>
+        {sending ? "Sending…" : watching ? "Waiting…" : "Send"}
       </Button>
       <Button size="sm" variant="outline" icon="check" loading={checking} disabled={disabled || !canCheck} onClick={onConfirm}>
         Check delivery

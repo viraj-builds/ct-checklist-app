@@ -16,6 +16,7 @@ import { IosLab } from "./ios/IosLab";
 import { IOS_HOW_TO_CHECK, IOS_NOTES } from "@/lib/ios-meta";
 import { CriticalEvents } from "./CriticalEvents";
 import { WebLab } from "./web/WebLab";
+import { ConsentGate } from "./Consent";
 import { WEB_HOW_TO_CHECK } from "@/lib/web-meta";
 import type { WebScanReport } from "@/lib/web/types";
 import { Card, Button, StatusBadge, StatusMark, MethodBadge, PlatformIcon, StatBar, EmptyState, Badge, Notice } from "@/components/ui";
@@ -477,9 +478,11 @@ export function Results({ id }: { id: string }) {
           </div>
 
           {/* ---------- Device stages (always mounted) ---------- */}
-          {hasLab && <DeviceLab audit={audit} view={deviceView} onNavigate={(v) => setStage(v)} />}
-          {hasIosLab && <IosLab audit={audit} view={deviceView} onNavigate={(v) => setStage(v)} />}
-          {hasWebLab && <WebLab audit={audit} visible={current.id === "web"} />}
+          {/* audits created before the data & privacy notice must accept it before any live test */}
+          {!audit.consent && (deviceView || current.id === "web") && <ConsentGate auditId={audit.id} />}
+          {audit.consent && hasLab && <DeviceLab audit={audit} view={deviceView} onNavigate={(v) => setStage(v)} />}
+          {audit.consent && hasIosLab && <IosLab audit={audit} view={deviceView} onNavigate={(v) => setStage(v)} />}
+          {audit.consent && hasWebLab && <WebLab audit={audit} visible={current.id === "web"} />}
 
           {/* ---------- Confirm by hand ---------- */}
           {hasConfirm && (

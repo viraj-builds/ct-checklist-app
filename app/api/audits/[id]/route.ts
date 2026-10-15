@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { assertAccess, deleteAudit, getAuditFor, setCriticalEvents } from "@/lib/server/audits";
+import { assertAccess, deleteAudit, getAuditFor, setConsent, setCriticalEvents } from "@/lib/server/audits";
 import { auditId, body, handle } from "@/lib/server/http";
 
 export const GET = handle(async (_req, ctx: RouteContext<"/api/audits/[id]">, user) => {
@@ -14,15 +14,20 @@ export const DELETE = handle(async (_req, ctx: RouteContext<"/api/audits/[id]">,
   return new Response(null, { status: 204 });
 });
 
-// Edit the audit's custom events to verify from the report page.
+// Edit the audit's custom events to verify, or accept the data & privacy notice
+// (audits created before it existed), from the report page.
 const Patch = z.object({
-  criticalEvents: z.array(z.string().trim().min(1).max(120)).max(10),
+  criticalEvents: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
+  consent: z
+    .object({ version: z.number().int().min(1), dataCapture: z.literal(true), screenshots: z.boolean().default(false) })
+    .optional(),
 });
 
 export const PATCH = handle(async (req, ctx: RouteContext<"/api/audits/[id]">, user) => {
   const id = auditId((await ctx.params).id);
-  const { criticalEvents } = await body(req, Patch);
+  const { criticalEvents, consent } = await body(req, Patch);
   await assertAccess(id, user);
-  await setCriticalEvents(id, [...new Set(criticalEvents)]);
+  if (consent) await setConsent(id, { ...consent, dataCapture: true, at: Date.now(), by: user.email });
+  if (criticalEvents) await setCriticalEvents(id, [...new Set(criticalEvents)]);
   return Response.json({ ok: true });
 });

@@ -26,7 +26,8 @@ export const POST = handle(async (req, ctx: RouteContext<"/api/audits/[id]/web-p
   const test = audit.api?.web?.tests?.[kind];
   if (!audit.api || !test) throw new HttpError(409, "Send a test web push first.");
   if (test.status === "failed") throw new HttpError(409, "That push wasn't sent — send a new one.");
-  if (test.status === "confirmed") return Response.json({ test, user: { webPushToken: audit.api.web?.user?.webPushToken ?? true } });
+  // Done — except a link push that was only viewed so far: keep checking for the click.
+  if (test.status === "confirmed" && (kind === "push" || test.clicked)) return Response.json({ test, user: { webPushToken: audit.api.web?.user?.webPushToken ?? true } });
   if (Date.now() - test.sentAt > MAX_AGE_MS) throw new HttpError(409, "This test push was sent more than 30 minutes ago — send a new one.");
   if (!audit.accountId || !audit.region) throw new HttpError(400, "Audit has no Account ID / region.");
   await assertActionQuota(user, id, "test-push-confirm", 60);

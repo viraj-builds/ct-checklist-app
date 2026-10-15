@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { assertActionQuota, getAuditFor, saveScan, updateAudit } from "@/lib/server/audits";
+import { assertActionQuota, assertConsent, getAuditFor, saveScan, updateAudit } from "@/lib/server/audits";
 import { auditId, body, handle, HttpError } from "@/lib/server/http";
 import { crawlSite } from "@/lib/web/crawler";
 import { assertSafeSiteUrl, UnsafeUrlError } from "@/lib/web/safe-url";
@@ -28,6 +28,7 @@ export const POST = handle(async (req, ctx: RouteContext<"/api/audits/[id]/crawl
   const id = auditId((await ctx.params).id);
   const { login } = await body(req, Crawl);
   const audit = await getAuditFor(id, user);
+  await assertConsent(id);
   if (audit.platform !== "web" || !audit.target) throw new HttpError(400, "This audit isn't a website audit.");
   await assertActionQuota(user, id, "crawl", 12);
 

@@ -294,4 +294,238 @@ select.input {
   .no-print {
     display: none !important;
   }
+  /* The export always prints in the light palette, whatever theme is on —
+     browsers drop background colours, so dark-theme text would be unreadable. */
+  :root,
+  .dark {
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #f7f8fa;
+    --surface-3: #e9ecf1;
+    --border: #dde2ea;
+    --border-strong: #c5ccd8;
+    --text: #172133;
+    --text-2: #2b3445;
+    --muted: #4b5568;
+    --muted-2: #5e6779;
+    --brand: #2f49d1;
+    --brand-text: #1f35a8;
+    --pass: #17663f;
+    --pass-soft: #e8f4ed;
+    --fail: #c9411c;
+    --fail-text: #b23a17;
+    --fail-soft: #fff4ef;
+    --warn: #9a5b00;
+    --warn-soft: #fdf5e6;
+    --manual: #2f49d1;
+    --manual-soft: #eef1fb;
+    --na: #5e6779;
+    --na-soft: #eef0f3;
+    color-scheme: light;
+  }
+  html,
+  body {
+    background: #ffffff !important;
+    color: #172133 !important;
+  }
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+@page {
+  size: A4;
+  margin: 14mm 12mm;
+}
+
+/* ---------- Exported report (components/audit/PrintReport.tsx) ---------- */
+.print-report {
+  font-size: 10.5pt;
+  line-height: 1.45;
+  color: #172133;
+}
+.print-report h1 {
+  margin: 2pt 0 8pt;
+  font-size: 20pt;
+  font-weight: 700;
+}
+.print-report h2 {
+  margin: 0 0 6pt;
+  font-size: 13pt;
+  font-weight: 700;
+  break-after: avoid;
+}
+.pr-kicker {
+  font-size: 9pt;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #2f49d1;
+}
+.pr-head {
+  padding-bottom: 10pt;
+  border-bottom: 1.5pt solid #172133;
+}
+.pr-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4pt 16pt;
+  margin: 0;
+}
+.pr-meta dt {
+  font-size: 8.5pt;
+  color: #5e6779;
+}
+.pr-meta dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.pr-score {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6pt 18pt;
+  margin: 12pt 0 14pt;
+  padding: 10pt 12pt;
+  border: 1pt solid #dde2ea;
+  border-radius: 6pt;
+  background: #f7f8fa;
+}
+.pr-score-main {
+  font-size: 14pt;
+}
+.pr-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4pt 14pt;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-weight: 600;
+}
+.pr-mark {
+  font-weight: 700;
+}
+.pr-section {
+  margin-top: 14pt;
+}
+.pr-sub {
+  font-size: 9.5pt;
+  font-weight: 500;
+  color: #5e6779;
+}
+.pr-fix {
+  margin: 0;
+  padding-left: 16pt;
+}
+.pr-fix > li {
+  margin-bottom: 7pt;
+  break-inside: avoid;
+}
+.pr-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.pr-table th {
+  padding: 4pt 6pt;
+  border-bottom: 1pt solid #c5ccd8;
+  text-align: left;
+  font-size: 8.5pt;
+  font-weight: 700;
+  color: #4b5568;
+}
+.pr-table td {
+  padding: 6pt;
+  border-bottom: 0.75pt solid #dde2ea;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.pr-table tr {
+  break-inside: avoid;
+}
+.pr-badge {
+  display: inline-block;
+  padding: 1pt 5pt;
+  border-radius: 4pt;
+  font-size: 8.5pt;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.pr-title {
+  font-weight: 700;
+}
+.pr-imp {
+  margin-left: 4pt;
+  padding: 0 4pt;
+  border: 0.75pt solid #2f49d1;
+  border-radius: 3pt;
+  font-size: 7.5pt;
+  font-weight: 700;
+  color: #1f35a8;
+}
+.pr-expected,
+.pr-note,
+.pr-doc {
+  font-size: 8.5pt;
+  color: #5e6779;
+}
+.pr-found {
+  font-weight: 600;
+}
+.pr-howto {
+  margin-top: 3pt;
+  padding: 3pt 6pt;
+  border-left: 2pt solid #c9411c;
+  background: #fff4ef;
+}
+.pr-details {
+  margin: 3pt 0 0;
+  padding-left: 12pt;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 8pt;
+}
+.pr-foot {
+  margin-top: 16pt;
+  padding-top: 8pt;
+  border-top: 0.75pt solid #dde2ea;
+  font-size: 8.5pt;
+  color: #5e6779;
+}
+.st-pass {
+  color: #17663f;
+}
+.st-fail {
+  color: #b23a17;
+}
+.st-warn {
+  color: #9a5b00;
+}
+.st-manual {
+  color: #2f49d1;
+}
+.st-na {
+  color: #5e6779;
+}
+.pr-badge.st-pass {
+  background: #e8f4ed;
+}
+.pr-badge.st-fail {
+  background: #fff4ef;
+}
+.pr-badge.st-warn {
+  background: #fdf5e6;
+}
+.pr-badge.st-manual {
+  background: #eef1fb;
+}
+.pr-badge.st-na {
+  background: #eef0f3;
 }

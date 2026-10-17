@@ -17,6 +17,7 @@ import { IOS_HOW_TO_CHECK, IOS_NOTES } from "@/lib/ios-meta";
 import { CriticalEvents } from "./CriticalEvents";
 import { WebLab } from "./web/WebLab";
 import { ConsentGate } from "./Consent";
+import { PrintReport } from "./PrintReport";
 import { WEB_HOW_TO_CHECK } from "@/lib/web-meta";
 import type { WebScanReport } from "@/lib/web/types";
 import { Card, Button, StatusBadge, StatusMark, MethodBadge, PlatformIcon, StatBar, EmptyState, Badge, Notice } from "@/components/ui";
@@ -254,7 +255,10 @@ export function Results({ id }: { id: string }) {
   ].filter(Boolean) as string[];
 
   return (
-    <div className="flex flex-col gap-8">
+    <>
+    <PrintReport audit={audit} />
+    {/* the interactive report; the export prints PrintReport instead */}
+    <div className="flex flex-col gap-8 print:hidden">
       {/* Audit header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 flex-1 basis-96 items-start gap-4">
@@ -283,8 +287,19 @@ export function Results({ id }: { id: string }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" icon="download" onClick={() => window.print()}>
-            Export
+          <Button
+            variant="secondary"
+            size="sm"
+            icon="download"
+            onClick={() => {
+              // the browser uses the page title as the PDF file name
+              const title = document.title;
+              document.title = `${audit.name} - CleverTap audit`;
+              window.print();
+              document.title = title;
+            }}
+          >
+            Export PDF
           </Button>
           <Button
             variant="ghost"
@@ -575,6 +590,7 @@ export function Results({ id }: { id: string }) {
         </div>
       </div>
     </div>
+    </>
   );
 }
 

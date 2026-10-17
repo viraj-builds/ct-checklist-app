@@ -8,6 +8,7 @@ import { runIosDeepLinks, runIosPushTest, simulatedPayload, type IosSendMode } f
 import { parseIosCtLog, type IosLogMessage } from "@/lib/device/ios/ctlog";
 import { mergeInsights, type LogInsights } from "@/lib/device/ctlog";
 import type { AppState, LogScenarios } from "@/lib/device/types";
+import { linkKind } from "@/lib/device/types";
 import type { IosApp, IosDeviceFindings, IosHelperStatus, IosPushTestResult, IosTarget } from "@/lib/device/ios/types";
 import type { Audit } from "@/lib/types";
 import type { TestPushRecord, TestUserRecord } from "@/lib/clevertap/types";
@@ -246,7 +247,10 @@ export function IosLab({ audit, view, onNavigate }: { audit: Audit; view: IosVie
     if (waiting !== "tap" || !ins) return;
     const click = ins.clicks.find((c) => c.line > mark.current);
     if (click) {
-      setSc((s) => ({ ...s, linkTap: { at: Date.now(), url: tapUrl.current, clicked: true, landed: click.deepLink ? `CleverTap opened ${click.deepLink}` : "app opened", openedOutsideApp: /^https?:/i.test(tapUrl.current) || undefined } }));
+      setSc((s) => {
+        const tap = { at: Date.now(), url: tapUrl.current, clicked: true, landed: click.deepLink ? `CleverTap opened ${click.deepLink}` : "app opened", openedOutsideApp: /^https?:/i.test(tapUrl.current) || undefined };
+        return { ...s, linkTap: tap, linkTaps: { ...s.linkTaps, [linkKind(tapUrl.current)]: tap } };
+      });
       setWaiting("");
     }
   }, [ins, waiting]);

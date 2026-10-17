@@ -71,9 +71,23 @@ export interface PushTestResult {
 export interface LogScenarios {
   // App restarted while logged in: did onUserLogin run on start?
   relaunch?: { at: number; onUserLoginOnStart: boolean; kinds: string[] };
-  // A push with a link was tapped: where did it open?
-  linkTap?: { at: number; url: string; clicked: boolean; landed?: string; openedOutsideApp?: boolean };
+  // A push with a link was tapped: where did it open? (the latest one)
+  linkTap?: LinkTap;
+  // The latest tap per kind, so testing an external link doesn't overwrite the
+  // internal (app link) result, and the other way round.
+  linkTaps?: Partial<Record<"internal" | "external", LinkTap>>;
 }
+
+export interface LinkTap {
+  at: number;
+  url: string;
+  clicked: boolean;
+  landed?: string;
+  openedOutsideApp?: boolean;
+}
+
+/** http(s) links are "external"; your own scheme (myapp://…) is "internal". */
+export const linkKind = (url: string): "internal" | "external" => (/^https?:/i.test(url) ? "external" : "internal");
 
 export interface DeviceFindings {
   connectedVia: "webusb" | "helper";

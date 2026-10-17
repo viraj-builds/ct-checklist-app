@@ -110,6 +110,12 @@ const Findings = z.object({
       linkTap: z
         .object({ at: z.number(), url: z.string().max(500), clicked: z.boolean(), landed: short.optional(), openedOutsideApp: z.boolean().optional() })
         .optional(),
+      linkTaps: z
+        .object({
+          internal: z.object({ at: z.number(), url: z.string().max(500), clicked: z.boolean(), landed: short.optional(), openedOutsideApp: z.boolean().optional() }).optional(),
+          external: z.object({ at: z.number(), url: z.string().max(500), clicked: z.boolean(), landed: short.optional(), openedOutsideApp: z.boolean().optional() }).optional(),
+        })
+        .optional(),
     })
     .optional(),
   logTagWasRestricted: z.boolean().optional(),

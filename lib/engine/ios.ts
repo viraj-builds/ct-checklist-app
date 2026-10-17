@@ -455,7 +455,7 @@ const RULES: Record<string, Rule> = {
   "app-t3-foreground": (c) => appStateCheck(c, "foreground"),
 
   "app-t3-deeplink-internal": ({ s, d }) => {
-    const tap = d?.logScenarios?.linkTap;
+    const tap = d?.logScenarios?.linkTaps?.internal ?? d?.logScenarios?.linkTap;
     if (tap && !/^https?:/i.test(tap.url) && tap.clicked)
       return res("pass", "Opened from the push", `Tapped a push with ${tap.url}; CleverTap fired the deep link${tap.landed ? ` (${tap.landed})` : ""}. Check it's the intended screen.`, "device");
     const tested = d?.deepLinks.filter((x) => !/^https?:/i.test(x.url)) ?? [];
@@ -475,7 +475,7 @@ const RULES: Record<string, Rule> = {
   },
 
   "app-t3-deeplink-external": ({ s, d }) => {
-    const t = d?.logScenarios?.linkTap;
+    const t = d?.logScenarios?.linkTaps?.external ?? d?.logScenarios?.linkTap;
     if (t && /^https?:/i.test(t.url) && t.clicked)
       return res("pass", "Opened from the push", `Tapped a push with ${t.url}; CleverTap opened it${t.openedOutsideApp ? " in Safari" : ""}.`, "device");
     if (!s) return res("manual", "Not checked", NO_SCAN, "none");

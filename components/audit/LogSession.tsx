@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { DeviceDriver } from "@/lib/device/drivers";
 import { mergeInsights, parseCtLog, type LogInsights } from "@/lib/device/ctlog";
 import type { LoggingState, LogScenarios } from "@/lib/device/types";
+import { linkKind } from "@/lib/device/types";
 import { ctTags, detectOem, liftLogging, readyScreen } from "@/lib/device/oem";
 import { parseProps } from "@/lib/device/runner";
 import { Button, Card, Notice, StatusMark } from "@/components/ui";
@@ -111,10 +112,10 @@ export function LogSession({
           if (tapped) {
             await sleep(2500);
             const landed = topActivity(await driver.run({ t: "focus" }));
-            setSc((s) => ({
-              ...s,
-              linkTap: { at: Date.now(), url, clicked: true, landed, openedOutsideApp: landed ? !landed.startsWith(pkg + "/") : undefined },
-            }));
+            setSc((s) => {
+              const tap = { at: Date.now(), url, clicked: true, landed, openedOutsideApp: landed ? !landed.startsWith(pkg + "/") : undefined };
+              return { ...s, linkTap: tap, linkTaps: { ...s.linkTaps, [linkKind(url)]: tap } };
+            });
             setWaiting("");
           } else if (Date.now() - tapStartedAt.current > 3 * 60_000) {
             setWaiting("");

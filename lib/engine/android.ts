@@ -510,7 +510,7 @@ const RULES: Record<string, Rule> = {
   },
 
   "app-t3-deeplink-internal": ({ s, d: dev }) => {
-    const tap = dev?.logScenarios?.linkTap;
+    const tap = dev?.logScenarios?.linkTaps?.internal ?? dev?.logScenarios?.linkTap;
     const a12 = android12ClickHook(s);
     if (tap && !/^https?:/i.test(tap.url) && tap.clicked && tap.landed) {
       if (tap.openedOutsideApp)
@@ -539,7 +539,7 @@ const RULES: Record<string, Rule> = {
   },
 
   "app-t3-deeplink-external": ({ s, d }) => {
-    const t = d?.logScenarios?.linkTap;
+    const t = d?.logScenarios?.linkTaps?.external ?? d?.logScenarios?.linkTap;
     if (t && /^https?:/i.test(t.url)) {
       if (t.clicked && t.landed)
         return res("pass", `Opened ${short(t.landed.split("/")[0])}`, `Tapped a push with ${t.url}; it opened ${t.landed}${t.openedOutsideApp ? " (outside the app, as expected for an external URL)" : ""}.`, "device", {

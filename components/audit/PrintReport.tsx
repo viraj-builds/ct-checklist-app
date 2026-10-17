@@ -128,8 +128,9 @@ export function PrintReport({ audit }: { audit: Audit }) {
                         {r?.evidence && <div>{r.evidence}</div>}
                         {r?.details && r.details.length > 0 && (st === "fail" || st === "warn") && (
                           <ul className="pr-details">
-                            {r.details.slice(0, 6).map((d) => (
-                              <li key={d}>{d}</li>
+                            {/* lines can repeat once masked (two phones → "919•••09"), so key by position */}
+                            {r.details.slice(0, 6).map((d, i) => (
+                              <li key={i}>{d}</li>
                             ))}
                           </ul>
                         )}

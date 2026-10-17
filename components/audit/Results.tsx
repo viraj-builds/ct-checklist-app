@@ -961,8 +961,9 @@ function ItemRow({
           {result?.details && result.details.length > 0 && (status === "fail" || status === "warn") && (
             <Detail label="Where">
               <ul className="mt-1 space-y-1 font-mono text-[13px] text-text-2">
-                {result.details.slice(0, 6).map((d) => (
-                  <li key={d} className="break-all">
+                {/* lines can repeat once masked, so key by position */}
+                {result.details.slice(0, 6).map((d, i) => (
+                  <li key={i} className="break-all">
                     {d}
                   </li>
                 ))}

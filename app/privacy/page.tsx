@@ -1,7 +1,7 @@
 import { Card, PageHeader } from "@/components/ui";
 import { CONSENT_POINTS, SCREENSHOT_POINT } from "@/lib/consent";
 
-export const metadata = { title: "Privacy — CT Integration Audit" };
+export const metadata = { title: "Privacy - CT Integration Audit" };
 
 const SECTIONS: { title: string; points: string[] }[] = [
   {

@@ -33,7 +33,16 @@ export function buildCommand(op: DeviceOp): string {
     case "home":
       return "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null 2>&1 || input keyevent 3";
     case "kill":
-      return `am kill ${pkg(op.pkg)}`;
+      // `am kill` skips the app the user just left ("previous app", protected for up
+      // to a minute). Opening Settings then Home makes Settings the previous app, so
+      // ours becomes an idle cached process that `am kill` can stop. Settings opens in
+      // a fresh task excluded from Recent apps (NEW_TASK | EXCLUDE_FROM_RECENTS |
+      // CLEAR_TASK), so it leaves no card behind once we're back on Home.
+      return `am start -W -a android.settings.SETTINGS -f 0x10808000 >/dev/null 2>&1; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null 2>&1; sleep 1; am kill ${pkg(op.pkg)}`;
+    case "killDebuggable":
+      // Debug builds only: kill the app's processes as the app's own user, the way a
+      // swipe does — not force-stop, which would block FCM. Release builds refuse run-as.
+      return `p=$(pidof ${pkg(op.pkg)} 2>/dev/null); [ -n "$p" ] && run-as ${pkg(op.pkg)} kill -9 $p 2>&1; true`;
     case "focus":
       return "{ dumpsys window displays | grep -E 'mCurrentFocus|mFocusedApp'; dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity'; } 2>/dev/null || true";
     case "deeplink":

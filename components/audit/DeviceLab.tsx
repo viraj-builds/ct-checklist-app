@@ -46,7 +46,7 @@ const STATES: { id: AppState; label: string; tech: string; auto: string; manual:
     id: "killed",
     label: "App closed",
     tech: "Killed",
-    auto: "We close the app (like swiping it away), then send a push.",
+    auto: "We close the app (like swiping it away), then send a push. Its card can stay in Recent apps — that's normal. If the phone keeps the app running, we'll ask you to swipe it away.",
     manual: "Swipe the app away from recent apps, then press Test.",
   },
 ];
@@ -75,6 +75,7 @@ export function DeviceLab({
   const [driver, setDriver] = useState<DeviceDriver | null>(null);
   const [busy, setBusy] = useState("");
   const [step, setStep] = useState("");
+  const [stepAlert, setStepAlert] = useState(false); // the step needs the user to act on the phone
   const [msg, setMsg] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
   const [findings, setFindings] = useState<DeviceFindings | null>(audit.device ?? null);
 
@@ -117,6 +118,7 @@ export function DeviceLab({
     } finally {
       setBusy("");
       setStep("");
+      setStepAlert(false);
       refreshAudit(audit.id);
     }
   }
@@ -226,7 +228,10 @@ export function DeviceLab({
 
       if (!driver || !pkg) throw new Error("Connect the phone first, under “Connect your phone”.");
       {
-        const result = await runPushTest(driver, pkg, state, send, setStep);
+        const result = await runPushTest(driver, pkg, state, send, (s, attention) => {
+          setStep(s);
+          setStepAlert(!!attention);
+        });
         const base: DeviceFindings =
           findingsRef.current ?? findings ?? { ...(await runDeviceChecks(driver, { pkg, deepLinks: [] }, setStep)), pushTests: {}, deepLinks: [] };
         // a delivered result is kept if a later re-test fails for a phone-side reason only
@@ -430,7 +435,11 @@ export function DeviceLab({
             {(needCreds || !driver) && (
               <p className="text-sm text-muted">{needCreds || "Connect the phone first, under “Connect your phone”, to run these tests."}</p>
             )}
-            {step && (
+            {step && stepAlert ? (
+              <Notice tone="warn" title="Action needed on the phone">
+                <span role="status">{step}</span>
+              </Notice>
+            ) : step && (
               <p role="status" className="flex items-center gap-2.5 text-[15px] font-semibold text-text-2">
                 <span className="pulse-dot h-2.5 w-2.5 rounded-full" style={{ background: "var(--brand)" }} /> {step}
               </p>

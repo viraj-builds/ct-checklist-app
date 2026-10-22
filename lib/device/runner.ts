@@ -95,7 +95,7 @@ export async function runPushTest(
   pkg: string,
   state: AppState,
   sendPush: (marker: string) => Promise<void>,
-  onStep: (s: string) => void,
+  onStep: (s: string, attention?: boolean) => void, // attention: the user must act on the phone
 ): Promise<PushTestResult> {
   const marker = Math.random().toString(36).slice(2, 10);
   let verifiedState = false;
@@ -112,13 +112,39 @@ export async function runPushTest(
       await sleep(1500);
     }
     if (state === "killed") {
-      // like swiping it away — not force-stop, which blocks FCM. Android refuses
-      // to kill the app it just left ("previous app") for a few seconds, so retry.
-      for (let i = 0; i < 4; i++) {
+      // like swiping it away — not force-stop, which blocks FCM. `am kill` only
+      // stops an idle (cached) process; the "kill" op first brings Settings to the
+      // front so the app stops being Android's protected "previous app".
+      onStep("Closing the app");
+      for (let i = 0; i < 3; i++) {
         await sleep(i ? 2500 : 1500);
         await d.run({ t: "kill", pkg });
         await sleep(800);
         if (!(await d.run({ t: "pidof", pkg })).trim()) break;
+        // a service can keep the app alive past `am kill`; a debug build can be
+        // killed directly (release builds refuse — then the next round retries)
+        if (i === 0) {
+          await soft(d.run({ t: "killDebuggable", pkg }));
+          await sleep(800);
+          if (!(await d.run({ t: "pidof", pkg })).trim()) break;
+        }
+      }
+      // Still running: a swipe from Recents does stop it, so ask for one rather
+      // than test a push in the wrong state.
+      if ((await d.run({ t: "pidof", pkg })).trim()) {
+        onStep("Android kept the app running. On the phone, open Recent apps and swipe this app away now — we'll continue as soon as it's closed.", true);
+        for (const until = Date.now() + 30_000; Date.now() < until; ) {
+          await sleep(1500);
+          if (!(await d.run({ t: "pidof", pkg })).trim()) break;
+        }
+        if ((await d.run({ t: "pidof", pkg })).trim())
+          return {
+            status: "error",
+            verifiedState,
+            stateDetail: "process still running",
+            sentAt: Date.now(),
+            detail: "Android kept the app running, so no push was sent (it wouldn't be a killed-state test). Press Test, then swipe the app away from Recent apps when asked.",
+          };
       }
     }
     const pid = (await d.run({ t: "pidof", pkg })).trim();
@@ -136,13 +162,14 @@ export async function runPushTest(
     stateDetail = `${inFront ? "app on screen" : "app not on screen"} · process ${pid ? "running" : "not running"}`;
     if (state === "killed" && pid)
       stateDetail += " (the phone kept the app alive — swipe it away from recents and press Test again)";
+    else if (state === "killed") stateDetail += " — its card may stay in Recent apps; that's only a snapshot";
   } catch (e) {
     return { status: "error", verifiedState, stateDetail, sentAt: Date.now(), detail: (e as Error).message };
   }
 
   const sentAt = Date.now();
   try {
-    onStep("Sending test push via CleverTap");
+    onStep("Sending test push via CleverTap"); // also clears an attention prompt
     await sendPush(marker);
   } catch (e) {
     return { status: "error", verifiedState, stateDetail, sentAt, detail: (e as Error).message };

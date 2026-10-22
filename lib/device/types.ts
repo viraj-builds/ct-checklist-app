@@ -17,6 +17,7 @@ export type DeviceOp =
   | { t: "launch"; pkg: string }
   | { t: "home" }
   | { t: "kill"; pkg: string }
+  | { t: "killDebuggable"; pkg: string } // run-as kill -9: works only on debuggable builds
   | { t: "focus" }
   | { t: "deeplink"; pkg: string; url: string }
   | { t: "getLogTag" } // some OEMs (vivo, Oppo…) set log.tag=E, which hides SDK logs

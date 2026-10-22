@@ -30,7 +30,7 @@ const flag = (name, def) => {
 const PORT = Number(flag("--port", "47811"));
 const ORIGINS = new Set(["http://localhost:3000", ...flag("--origin", "").split(",").filter(Boolean)].map((o) => o.replace(/\/$/, "")));
 const TOKEN = randomBytes(12).toString("hex");
-const HELPER_VERSION = 3; // bump when the command list changes (lib/device/drivers.ts HELPER_MIN_VERSION)
+const HELPER_VERSION = 4; // bump when the command list changes (lib/device/drivers.ts HELPER_MIN_VERSION)
 
 function findAdb() {
   const exe = process.platform === "win32" ? "adb.exe" : "adb";
@@ -92,7 +92,8 @@ function buildCommand(op) {
     case "pidof": return `pidof ${pkg(op.pkg)} 2>/dev/null || ps 2>/dev/null | grep -F ' ${pkg(op.pkg)}' | grep -v -F '${pkg(op.pkg)}:' | head -n 1 || true`;
     case "launch": return `c=$(cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${pkg(op.pkg)} 2>/dev/null | tail -n 1); case "$c" in */*) am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000 -n "$c";; *) monkey -p ${pkg(op.pkg)} -c android.intent.category.LAUNCHER 1;; esac`;
     case "home": return "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null 2>&1 || input keyevent 3";
-    case "kill": return `am kill ${pkg(op.pkg)}`;
+    case "kill": return `am start -W -a android.settings.SETTINGS -f 0x10808000 >/dev/null 2>&1; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null 2>&1; sleep 1; am kill ${pkg(op.pkg)}`; // Settings (kept out of Recents) first so the app stops being the protected "previous app"
+    case "killDebuggable": return `p=$(pidof ${pkg(op.pkg)} 2>/dev/null); [ -n "$p" ] && run-as ${pkg(op.pkg)} kill -9 $p 2>&1; true`; // debug builds only; not force-stop (blocks FCM)
     case "focus": return "{ dumpsys window displays | grep -E 'mCurrentFocus|mFocusedApp'; dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity'; } 2>/dev/null || true";
     case "deeplink":
       if (typeof op.url !== "string" || !URL_SAFE.test(op.url) || op.url.length > 500) throw new Error("Deep link contains unsupported characters.");

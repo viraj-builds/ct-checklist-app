@@ -43,6 +43,7 @@ main: ring buffer is 256 KiB (200 KiB consumed), max entry is 5120 B`,
   launch: () => ((running = true), (foreground = true), "Events injected: 1"),
   home: () => ((foreground = false), ""),
   kill: () => ((running = foreground), ""), // am kill only kills background apps
+  killDebuggable: () => "run-as: package not debuggable: x",
   focus: () => `  mCurrentFocus=Window{1 u0 ${foreground ? `${PKG}/${PKG}.MainActivity` : "com.google.android.apps.nexuslauncher/.NexusLauncherActivity"}}\n`,
   deeplink: (op) =>
     (op as { url: string }).url.startsWith("novamart://")

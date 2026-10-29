@@ -9,6 +9,7 @@ import {
   helperConnect,
   helperDriver,
   helperPair,
+  uniquePhones,
   helperHello,
   HELPER_MIN_VERSION,
   helperStatus,
@@ -114,7 +115,7 @@ export function DeviceLab({
         void driver?.close().catch(() => {});
         setDriver(null);
       }
-      setMsg({ tone: "err", text });
+      setMsg({ tone: "err", text: explainAdb(text) });
     } finally {
       setBusy("");
       setStep("");
@@ -367,7 +368,7 @@ export function DeviceLab({
               </div>
               {mode === "usb" && <UsbConnect supported={typeof window !== "undefined" && webUsbSupported()} busy={busy === "connect"} onConnect={connect} />}
               {mode === "helper" && (
-                <HelperConnect activeSerial={driver?.serial} onDriver={setDriver} onError={(t) => setMsg({ tone: "err", text: t })} />
+                <HelperConnect activeSerial={driver?.serial} onDriver={setDriver} onError={(t) => setMsg({ tone: "err", text: explainAdb(t) })} />
               )}
               <p className="mt-4 text-sm text-muted">
                 Both work the same way. USB needs Chrome or Edge. Wi-Fi needs the small helper, because browsers can&apos;t reach a phone over the network.
@@ -630,7 +631,8 @@ function HelperConnect({
         const list = (await helperStatus(t)).devices;
         if (!alive) return;
         setDevices(list);
-        const ready = list.filter((d) => d.state === "device");
+        // the same phone can be listed twice — count phones, not connections
+        const ready = uniquePhones(list).filter((d) => d.state === "device");
         if (ready.length === 1 && !used.current) {
           used.current = true;
           onDriver(helperDriver(t, ready[0]));
@@ -647,15 +649,28 @@ function HelperConnect({
     };
   }, [token, onDriver]);
 
+  // Android shows "IP address & Port" as one value (192.168.0.103:37115) and the
+  // code with a space (123 456) — accept them however they're typed or pasted.
+  const target = hostPort(ip);
+  const pairDigits = code.replace(/\D/g, "");
+  const pairPortNum = portOf(pairPort) ?? (target?.port ? Number(target.port) : undefined);
+  const connPortNum = portOf(connPort) ?? (target?.port ? Number(target.port) : undefined);
+
   const pair = () =>
     run("pair", async () => {
-      const r = await helperPair(token, ip.trim(), Number(pairPort), code.trim());
-      if (!r.connected) onError("Paired. Now type the port shown on the main Wireless debugging screen and press Connect.");
+      if (!target) throw new Error("Type the phone's IP address, e.g. 192.168.0.103 (shown in the pairing pop-up).");
+      const r = await helperPair(token, target.host, pairPortNum!, pairDigits).catch((e: Error) => {
+        throw new Error(connectHelp(e.message, target.host, os, true));
+      });
+      if (!r.connected) onError("Paired. Now type the port shown on the main Wireless debugging screen (not the pop-up) and press Connect.");
       setDevices((await helperStatus(token)).devices);
     });
   const connectWifi = () =>
     run("connect", async () => {
-      await helperConnect(token, ip.trim(), Number(connPort));
+      if (!target) throw new Error("Type the phone's IP address, e.g. 192.168.0.103 (shown on the Wireless debugging screen).");
+      const r = await helperConnect(token, target.host, connPortNum!);
+      // adb answers "connected to …" / "already connected to …" — anything else failed
+      if (!/connected to/i.test(r.output)) throw new Error(connectHelp(r.output, target.host, os));
       setDevices((await helperStatus(token)).devices);
     });
 
@@ -719,17 +734,23 @@ function HelperConnect({
             <Icon name="chevronDown" size={18} className="ml-auto shrink-0 text-muted transition group-open:rotate-180" />
           </summary>
           <ol className="mt-3 list-decimal space-y-1.5 pl-6 text-[15px] text-text-2">
-            <li>Put the phone and computer on the same Wi-Fi.</li>
+            <li>Put the phone and computer on the same Wi-Fi (not a guest network, and with any VPN off — both stop them seeing each other).</li>
+            {os === "mac" && (
+              <li>
+                On a Mac (macOS 15+): System Settings → Privacy &amp; Security → <b>Local Network</b> → turn on Terminal (or the app you ran the helper
+                from), then stop the helper (Ctrl+C) and start it again. Without this the Mac can&apos;t find or reach the phone.
+              </li>
+            )}
             <li>On the phone: Developer options → Wireless debugging ON → “Pair device with pairing code”.</li>
             <li>
               Type the <b>IP address and port</b> and the <b>6-digit code</b> from that pop-up, then press Pair. We connect right after.
             </li>
           </ol>
           <div className="mt-4 grid gap-3 sm:grid-cols-[1.4fr_1fr_1fr_auto]">
-            <input value={ip} onChange={(e) => setIp(e.target.value)} className="input font-mono" placeholder="IP, e.g. 192.168.0.103" aria-label="Phone IP address" />
+            <input value={ip} onChange={(e) => setIp(e.target.value)} className="input font-mono" placeholder="IP (or IP:port), e.g. 192.168.0.103" aria-label="Phone IP address" />
             <input value={pairPort} onChange={(e) => setPairPort(e.target.value)} className="input font-mono" placeholder="Port in the pop-up" aria-label="Pairing port" />
             <input value={code} onChange={(e) => setCode(e.target.value)} className="input font-mono" placeholder="6-digit code" aria-label="Pairing code" />
-            <Button variant="secondary" loading={busy === "pair"} disabled={!ip || !pairPort || code.trim().length !== 6 || !!busy} onClick={pair}>
+            <Button variant="secondary" loading={busy === "pair"} disabled={!target || !pairPortNum || pairDigits.length !== 6 || !!busy} onClick={pair}>
               {busy === "pair" ? "Pairing…" : "Pair and connect"}
             </Button>
           </div>
@@ -737,7 +758,7 @@ function HelperConnect({
             <summary className="cursor-pointer text-sm font-semibold text-muted">Paired before? Connect with the port on the main Wireless debugging screen</summary>
             <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
               <input value={connPort} onChange={(e) => setConnPort(e.target.value)} className="input font-mono" placeholder="Port, e.g. 37115" aria-label="Connection port" />
-              <Button variant="secondary" loading={busy === "connect"} disabled={!ip || !connPort || !!busy} onClick={connectWifi}>
+              <Button variant="secondary" loading={busy === "connect"} disabled={!target || !connPortNum || !!busy} onClick={connectWifi}>
                 {busy === "connect" ? "Connecting…" : "Connect"}
               </Button>
             </div>
@@ -753,7 +774,7 @@ function HelperConnect({
               Waiting for a phone — plug in a USB cable or pair over Wi-Fi above.
             </p>
           )}
-          {devices.map((d) => (
+          {uniquePhones(devices, activeSerial).map((d) => (
             <div key={d.serial} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3">
               <span className="flex flex-col">
                 <b className="text-[15px]">{d.model ?? d.serial}</b>
@@ -886,4 +907,46 @@ function DeviceSummary({ f }: { f: DeviceFindings }) {
       )}
     </Card>
   );
+}
+
+/** "192.168.0.103" or "192.168.0.103:37115" → host (+ port). */
+function hostPort(v: string): { host: string; port?: string } | null {
+  const m = v.trim().match(/^(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{2,5}))?$/);
+  return m ? { host: m[1], port: m[2] } : null;
+}
+
+/** A port field may hold just the port or a pasted "ip:port". */
+function portOf(v: string): number | undefined {
+  const m = v.trim().match(/(\d{2,5})$/);
+  const n = m ? Number(m[1]) : NaN;
+  return n > 0 && n < 65536 ? n : undefined;
+}
+
+/** Turn adb's "failed to connect" answers into what to do next. */
+function connectHelp(output: string, host: string, os: "win" | "mac" = "win", pairing = false): string {
+  const o = output.trim();
+  // macOS 15+ blocks local-network connections from apps without the Local Network permission
+  if (os === "mac" && /no route to host|host is down|not permitted|EHOSTUNREACH|EPERM/i.test(o))
+    return `macOS is blocking the connection to the phone. System Settings → Privacy & Security → Local Network → turn on Terminal (or the app you started the helper from), then restart the helper and try again. (${o})`;
+  const twoAdbs =
+    "If Android Studio, scrcpy or another adb tool is open, close it — two adb versions keep resetting each other — then run “adb kill-server” and try again.";
+  if (pairing && /wrong password|protocol fault|unable to start pairing/i.test(o))
+    return `Pairing failed — the code or pairing port didn't match. Tap “Pair device with pairing code” again on the phone and use the new code and port (they change each time). ${twoAdbs} (${o})`;
+  if (!pairing && /protocol fault/i.test(o))
+    return `The phone answered but the connection didn't finish. Check: 1) use the port on the main Wireless debugging screen, not the pairing pop-up; 2) if it still fails, turn Wireless debugging off and on and pair again with a new code; 3) ${twoAdbs} (${o})`;
+  if (pairing) return o;
+  if (/refused/i.test(o))
+    return `The phone refused the connection. Use the port on the main Wireless debugging screen (not the pairing pop-up) — it changes every time Wireless debugging is turned on. (${o})`;
+  if (/timed out|unreachable|no route|10060|10065/i.test(o))
+    return `This computer can't reach the phone at ${host}. Check both are on the same Wi-Fi (not a guest network), any VPN is off, and the IP on the phone hasn't changed. (${o})`;
+  if (/authenticat|unauthori[sz]ed/i.test(o))
+    return `The phone isn't paired with this computer yet. Use “Pair and connect” with the 6-digit code first. (${o})`;
+  return o ? `Couldn't connect: ${o}` : "Couldn't connect — check the IP and port on the phone's Wireless debugging screen.";
+}
+
+/** adb's low-level faults while talking to an already-connected phone, in plain words. */
+function explainAdb(text: string): string {
+  if (/protocol fault|connection reset|device offline|device '[^']*' not found/i.test(text) && !/^(The phone|Pairing failed|macOS is blocking)/.test(text))
+    return `The connection to the phone dropped (adb said: ${text.trim()}). Reconnect it under “Connect your phone” — over Wi-Fi, use the port on the main Wireless debugging screen, and pair again if Wireless debugging was turned off. If Android Studio, scrcpy or another adb tool is open, close it and run “adb kill-server”.`;
+  return text;
 }

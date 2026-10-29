@@ -4,6 +4,7 @@ import type { AppState, DeviceFindings } from "../device/types";
 import type { ItemResult, ItemStatus, ResultSource } from "../types";
 import { itemsForPlatform } from "../checklist";
 import { getFaq } from "../faq";
+import { sameAccount } from "../account";
 
 // ---------------------------------------------------------------------------
 // Android rule engine: (static report, API findings, live-device findings)
@@ -102,7 +103,7 @@ function usageEvidence(u: ApiUsage): string[] {
 const RULES: Record<string, Rule> = {
   "app-t1-credentials": ({ s, a, accountId, region, d }) => {
     const L = d?.logs;
-    if (L?.accountId && accountId && L.accountId.toUpperCase() !== accountId.trim().toUpperCase())
+    if (L?.accountId && accountId && !sameAccount(L.accountId, accountId))
       return res("fail", "Wrong account (live)", `The running app sends data to ${L.accountId}, but this audit is for ${accountId}.`, "device", {
         remediation: "Copy the Project ID and Token from Dashboard → Settings → Project into the app.",
       });
@@ -144,7 +145,7 @@ const RULES: Record<string, Rule> = {
     if (!tok && !creds.found)
       return res("fail", "Token missing", "CLEVERTAP_ACCOUNT_ID is set but CLEVERTAP_TOKEN is missing.", "static", { remediation: fix1, details });
 
-    if (accountId && acc && acc.toUpperCase() !== accountId.trim().toUpperCase())
+    if (accountId && acc && !sameAccount(acc, accountId))
       return res("fail", "Wrong account", `The app sends data to account ${acc}, but this audit is for ${accountId}.`, "static", {
         remediation: "Copy the Project ID and Token from Dashboard → Settings → Project into the manifest.",
         details,

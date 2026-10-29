@@ -25,6 +25,7 @@ export function CriticalEvents({ audit }: { audit: Audit }) {
     ...((audit.device ?? audit.iosDevice)?.logs?.events.map((e) => e.name) ?? []),
     ...customEventNames(audit.api?.testUser),
     ...(audit.scan?.eventNames ?? []),
+    ...(audit.webLive?.events.map((e) => e.name) ?? []),
     ...(audit.webScan?.events.map((e) => e.name) ?? []),
     ...(audit.webScan?.eventNames ?? []),
   ];
@@ -54,23 +55,31 @@ export function CriticalEvents({ audit }: { audit: Audit }) {
     }
   }
 
+  // Only what you do during this audit counts as seen: the phone's SDK logs, the
+  // live website session or the website check. CleverTap's 30-day history is
+  // shown for context only — it can't prove the integration works today.
   const statusOf = (name: string) => {
-    const live = (audit.device ?? audit.iosDevice)?.logs?.events.find((e) => e.name === name);
+    const live =
+      (audit.device ?? audit.iosDevice)?.logs?.events.find((e) => e.name === name) ??
+      audit.webLive?.events.find((e) => e.name === name) ??
+      audit.webScan?.events.find((e) => e.name === name);
     const fromApi = audit.api?.events[name];
-    if (live?.issues.length || Object.values(fromApi?.props ?? {}).some((p) => p.numericStrings || p.dateLikeStrings || p.types.nullish))
-      return { t: "property issues", c: "var(--fail-text)" };
+    if (live?.issues.length) return { t: "property issues", c: "var(--fail-text)" };
     if (live) return { t: `seen live ×${live.count}`, c: "var(--pass)" };
-    if (fromApi && fromApi.androidSampled > 0) return { t: `${fromApi.capped ? "≥" : ""}${fromApi.androidSampled} in 30 days`, c: "var(--pass)" };
-    if (fromApi) return { t: "no data in 30 days", c: "var(--fail-text)" };
-    return { t: "not checked yet", c: "var(--muted-2)" };
+    if (Object.values(fromApi?.props ?? {}).some((p) => p.numericStrings || p.dateLikeStrings || p.types.nullish))
+      return { t: "not seen live · property issues in past data", c: "var(--fail-text)" };
+    if (fromApi && fromApi.androidSampled > 0)
+      return { t: `not seen live yet · ${fromApi.capped ? "≥" : ""}${fromApi.androidSampled} in the last 30 days`, c: "var(--muted)" };
+    return { t: "not seen live yet", c: "var(--muted-2)" };
   };
 
   return (
     <Card className="p-6">
       <h3 className="text-lg font-bold">Your custom events</h3>
       <p className="mt-1 max-w-[66ch] text-[15px] text-text-2">
-        Pick the 3–4 custom events that matter most, such as <i>Product Viewed</i> or <i>Added To Cart</i>. Then do those actions on the phone under
-        “Your custom events” below — we check each one arrives with the right property types. Names must match your code exactly.
+        Pick the 3–4 custom events that matter most, such as <i>Product Viewed</i> or <i>Added To Cart</i>. Then do those actions{" "}
+        {audit.platform === "web" ? "on your site in the live session (Website tests)" : "on the phone under “Your custom events” below"} — only events seen live
+        count, and we check each arrives with the right property types. Names must match your code exactly.
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -114,7 +123,7 @@ export function CriticalEvents({ audit }: { audit: Audit }) {
 
       {suggestions.length > 0 && (
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <span className="text-sm text-muted">Seen in this app:</span>
+          <span className="text-sm text-muted">{audit.platform === "web" ? "Found on this site:" : "Seen in this app:"}</span>
           {suggestions.map((n) => (
             <button
               key={n}

@@ -3,6 +3,7 @@ import type { ItemResult, ItemStatus, ResultSource } from "../types";
 import type { LivePushTest, WebEvent, WebLiveFindings, WebScanReport } from "../web/types";
 import { itemsForPlatform } from "../checklist";
 import { getFaq } from "../faq";
+import { isTestAccount, sameAccount } from "../account";
 import { compareVersions } from "./android";
 
 // ---------------------------------------------------------------------------
@@ -67,9 +68,11 @@ const RULES: Record<string, Rule> = {
     if (sdk.scriptUrl) details.push(`Script: ${sdk.scriptUrl}`);
     if (sdk.firstRequestMs !== undefined) details.push(`First request ${(sdk.firstRequestMs / 1000).toFixed(1)} s after the page started loading`);
 
-    if (accountId && sdk.accountId && sdk.accountId.toUpperCase() !== accountId.trim().toUpperCase())
-      return res("fail", "Wrong account", `The site sends data to ${sdk.accountId}, but this audit is for ${accountId}.`, "static", {
-        remediation: "Use the Project ID from Dashboard → Settings → Project in clevertap.account.push / clevertap.init().",
+    if (accountId && sdk.accountId && !sameAccount(sdk.accountId, accountId))
+      return res("fail", "Wrong account", `The site sends data to ${sdk.accountId}${isTestAccount(sdk.accountId) ? " (a test project)" : ""}, but this audit is for ${accountId}.`, "static", {
+        remediation: isTestAccount(sdk.accountId)
+          ? `If you're auditing the test project, start a new audit with ${sdk.accountId} (keep the TEST- prefix) and that project's passcode. Otherwise put the live Project ID from Dashboard → Settings → Project in clevertap.account.push / clevertap.init().`
+          : "Use the Project ID from Dashboard → Settings → Project in clevertap.account.push / clevertap.init().",
         details,
       });
     if (region && sdk.region && normRegion(sdk.region) !== normRegion(region))
@@ -255,18 +258,21 @@ const RULES: Record<string, Rule> = {
       ...live.slice(0, 8).map(fmtEvent),
       ...apiEv.filter((e) => e.androidSampled > 0).slice(0, 5).map((e) => `${e.name}: ${e.capped ? "≥" : ""}${e.androidSampled} in ${e.windowDays} days (API)`),
     ];
-    const missing = ce.filter((n) => !live.some((e) => e.name === n) && !((a?.events[n]?.androidSampled ?? 0) > 0));
+    // listed events must be seen during this audit (live session / website check), not just in past data
+    const missing = ce.filter((n) => !live.some((e) => e.name === n));
     if (issues.length)
       return res("fail", `${issues.length} property issue${issues.length > 1 ? "s" : ""}`, 'Some event / user properties are sent with empty or "null" values, numbers as text or dates as text.', live.length ? "static" : "api", {
         remediation: `${faqFix(10) ?? ""} Leave a property out when it has no value — never send "", " " or "null".`.trim(),
         details: [...issues.slice(0, 10), ...details.slice(0, 4)],
       });
-    if (live.length || apiEv.some((e) => e.androidSampled > 0)) {
+    if (live.length) {
       if (missing.length)
-        return res("warn", `${ce.length - missing.length} of ${ce.length} listed custom events seen`, `Custom events arrive, but not seen yet: ${list(missing)}. Do those actions on the site, then press “Check CleverTap again”.`, live.length ? "static+api" : "api", { details });
-      return res("pass", `${live.length || apiEv.filter((e) => e.androidSampled > 0).length} custom event${live.length === 1 ? "" : "s"} with valid properties`,
-        live.length ? `While we browsed the site it sent ${list(live.map((e) => e.name))} with correctly typed properties.` : "Your custom events arrive in CleverTap with correctly typed properties.", live.length ? "static" : "api", { details });
+        return res("warn", `${ce.length - missing.length} of ${ce.length} listed custom events seen live`, `Custom events fire, but not seen live yet: ${list(missing)}. Do those actions on your site in the live session (Website tests).`, "static", { details });
+      return res("pass", `${live.length} custom event${live.length === 1 ? "" : "s"} with valid properties`,
+        `While the site was in use it sent ${list(live.map((e) => e.name))} with correctly typed properties.`, "static", { details });
     }
+    if (apiEv.some((e) => e.androidSampled > 0))
+      return res("manual", "Only in past data — not seen live", "Your custom events appear in CleverTap's last 30 days, but none fired during this audit. Trigger your custom events on the site in the live session (Website tests) so we can see them live.", "api", { details });
     if (s?.code.eventPush.found || s?.eventNames.length)
       return res("manual", "In the code — not fired yet", `The site's code sends custom events${s.eventNames.length ? ` (${list(s.eventNames, 6)})` : ""}, but none fired on the pages we opened (we only follow links, we don't click buttons). List your custom events and press “Check CleverTap again” after using the site.`, "static", { details: s.code.eventPush.evidence.slice(0, 3) });
     if (!s) return res("manual", "Not checked", NO_SCAN, "none");

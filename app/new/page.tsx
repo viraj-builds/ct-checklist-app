@@ -226,6 +226,19 @@ export default function NewAuditPage() {
                       placeholder="For example W8R-K6R-XXXX"
                       className="input font-mono"
                     />
+                    {/* test projects need the TEST- prefix in every API call */}
+                    <label className="mt-2 flex cursor-pointer items-center gap-2 text-[13px] text-text-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-[var(--brand)]"
+                        checked={/^TEST-/i.test(accountId.trim())}
+                        onChange={(e) => {
+                          const bare = accountId.trim().replace(/^TEST-/i, "");
+                          setAccountId(e.target.checked ? `TEST-${bare}` : bare);
+                        }}
+                      />
+                      This is a test project (adds the TEST- prefix)
+                    </label>
                   </Field>
                   <Field label="Region" htmlFor="region">
                     <select id="region" value={region} onChange={(e) => setRegion(e.target.value)} className="input">

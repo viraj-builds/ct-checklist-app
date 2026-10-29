@@ -18,6 +18,7 @@ import { CriticalEvents } from "./CriticalEvents";
 import { WebLab } from "./web/WebLab";
 import { ConsentGate } from "./Consent";
 import { PrintReport } from "./PrintReport";
+import { AccountCheck } from "./AccountCheck";
 import { WEB_HOW_TO_CHECK } from "@/lib/web-meta";
 import type { WebScanReport } from "@/lib/web/types";
 import { Card, Button, StatusBadge, StatusMark, MethodBadge, PlatformIcon, StatBar, EmptyState, Badge, Notice } from "@/components/ui";
@@ -406,6 +407,7 @@ export function Results({ id }: { id: string }) {
           {/* ---------- Summary ---------- */}
           <div className={cx(current.id !== "overview" && "hidden print:block")}>
             <div className="space-y-8">
+              <AccountCheck audit={audit} />
               <Verdict
                 running={running}
                 s={s}

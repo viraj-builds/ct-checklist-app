@@ -89,6 +89,27 @@ export interface HelperDevice {
   model?: string;
   state: string;
   transport: "usb" | "wifi";
+  hwSerial?: string; // the phone's own serial (same for every connection to it)
+  transportId?: number; // adb's connection number — higher is newer
+}
+
+/**
+ * One row per physical phone: adb may list the same phone twice (Wi-Fi by
+ * IP:port and via mDNS, or USB + Wi-Fi). Keep the connection in use, otherwise
+ * the newest ready one.
+ */
+export function uniquePhones(list: HelperDevice[], activeSerial?: string): HelperDevice[] {
+  const groups = new Map<string, HelperDevice[]>();
+  for (const d of list) {
+    const k = d.hwSerial ?? d.serial;
+    groups.set(k, [...(groups.get(k) ?? []), d]);
+  }
+  return [...groups.values()].map(
+    (g) =>
+      g.find((d) => d.serial === activeSerial) ??
+      g.filter((d) => d.state === "device").sort((a, b) => (b.transportId ?? 0) - (a.transportId ?? 0))[0] ??
+      g[0],
+  );
 }
 
 async function helper<T>(token: string, path: string, body?: unknown): Promise<T> {
@@ -107,7 +128,7 @@ async function helper<T>(token: string, path: string, body?: unknown): Promise<T
   return json as T;
 }
 
-export const HELPER_MIN_VERSION = 4; // must match HELPER_VERSION in public/ct-device-bridge.mjs
+export const HELPER_MIN_VERSION = 5; // must match HELPER_VERSION in public/ct-device-bridge.mjs
 
 /** Ask a running helper for its token (only answered for the audit site's own origin). */
 export async function helperHello(): Promise<{ token: string; version: number } | null> {

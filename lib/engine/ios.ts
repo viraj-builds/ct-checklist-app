@@ -6,6 +6,7 @@ import type { IosDeviceFindings } from "../device/ios/types";
 import type { ItemResult, ItemStatus, ResultSource } from "../types";
 import { itemsForPlatform } from "../checklist";
 import { getFaq } from "../faq";
+import { sameAccount } from "../account";
 import { compareVersions, customEventNames } from "./android";
 
 // ---------------------------------------------------------------------------
@@ -78,7 +79,7 @@ const CAPABILITY_FIX =
 const RULES: Record<string, Rule> = {
   "app-t1-credentials": ({ s, a, accountId, region, d }) => {
     const L = d?.logs;
-    if (L?.accountId && accountId && L.accountId.toUpperCase() !== accountId.trim().toUpperCase())
+    if (L?.accountId && accountId && !sameAccount(L.accountId, accountId))
       return res("fail", "Wrong account (live)", `The running app sends data to ${L.accountId}, but this audit is for ${accountId}.`, "device", {
         remediation: "Copy the Project ID and Token from Dashboard → Settings → Project into CleverTapAccountID / CleverTapToken in Info.plist.",
       });
@@ -118,7 +119,7 @@ const RULES: Record<string, Rule> = {
       });
     if (!p.token && !inCode.found)
       return res("fail", "Token missing", "CleverTapAccountID is set but CleverTapToken is missing.", "static", { remediation: fix1, details });
-    if (accountId && p.accountId.toUpperCase() !== accountId.trim().toUpperCase())
+    if (accountId && !sameAccount(p.accountId, accountId))
       return res("fail", "Wrong account", `The app sends data to account ${p.accountId}, but this audit is for ${accountId}.`, "static", {
         remediation: "Copy the Project ID and Token from Dashboard → Settings → Project into Info.plist.",
         details,

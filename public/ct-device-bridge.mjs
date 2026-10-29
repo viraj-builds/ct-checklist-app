@@ -30,7 +30,7 @@ const flag = (name, def) => {
 const PORT = Number(flag("--port", "47811"));
 const ORIGINS = new Set(["http://localhost:3000", ...flag("--origin", "").split(",").filter(Boolean)].map((o) => o.replace(/\/$/, "")));
 const TOKEN = randomBytes(12).toString("hex");
-const HELPER_VERSION = 4; // bump when the command list changes (lib/device/drivers.ts HELPER_MIN_VERSION)
+const HELPER_VERSION = 5; // bump when the command list changes (lib/device/drivers.ts HELPER_MIN_VERSION)
 
 function findAdb() {
   const exe = process.platform === "win32" ? "adb.exe" : "adb";
@@ -123,13 +123,24 @@ function buildCommand(op) {
 const SERIAL = /^[A-Za-z0-9._:\-]{1,100}$/;
 const HOST = /^(\d{1,3}\.){3}\d{1,3}$/;
 
+// One phone can show up more than once (Wi-Fi connected by IP:port *and* found
+// over mDNS, or USB + Wi-Fi). Its hardware serial lets the page show it once.
+const hwSerials = new Map();
+
 async function devices() {
   const out = await adb(["devices", "-l"]);
-  return out.split("\n").slice(1).map((l) => l.trim()).filter(Boolean).map((l) => {
+  const list = out.split("\n").slice(1).map((l) => l.trim()).filter(Boolean).map((l) => {
     const [serial, state] = l.split(/\s+/);
     const model = l.match(/model:(\S+)/)?.[1]?.replace(/_/g, " ");
-    return { serial, state, model, transport: /:\d+$|_adb-tls-connect/.test(serial) ? "wifi" : "usb" };
+    const transportId = Number(l.match(/transport_id:(\d+)/)?.[1] ?? 0); // higher = newer connection
+    return { serial, state, model, transportId, transport: /:\d+$|_adb-tls-connect/.test(serial) ? "wifi" : "usb" };
   });
+  for (const d of list) {
+    if (d.state !== "device" || hwSerials.has(d.serial)) continue;
+    const s = (await adb(["-s", d.serial, "shell", "getprop", "ro.serialno"], 8000).catch(() => "")).trim();
+    hwSerials.set(d.serial, /^[A-Za-z0-9._-]{1,64}$/.test(s) ? s : d.serial);
+  }
+  return list.map((d) => ({ ...d, hwSerial: hwSerials.get(d.serial) }));
 }
 
 // --- HTTP ---------------------------------------------------------------
@@ -212,7 +223,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/v1/connect") {
       const { host, port } = await readJson(req);
       if (!HOST.test(String(host)) || !(port > 0 && port < 65536)) throw new Error("Enter the IP and port shown under Wireless debugging.");
-      return send(res, 200, { output: await adb(["connect", `${host}:${port}`], 30_000) }, allowed);
+      let output = await adb(["connect", `${host}:${port}`], 30_000).catch((e) => e.message);
+      // "protocol fault (couldn't read status message)" is often a one-off — retry once
+      if (/protocol fault/i.test(output)) {
+        await new Promise((r) => setTimeout(r, 1500));
+        output = await adb(["connect", `${host}:${port}`], 30_000).catch((e) => e.message);
+      }
+      return send(res, 200, { output }, allowed);
     }
     return send(res, 404, { error: "Not found" }, allowed);
   } catch (e) {

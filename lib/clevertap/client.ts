@@ -1,4 +1,5 @@
 import "server-only";
+import { otherAccountSpelling } from "../account";
 
 // Thin client for the CleverTap REST API. Docs:
 //   https://developer.clevertap.com/docs/api-overview
@@ -31,7 +32,31 @@ export function baseUrl(region: string): string {
 
 type Json = Record<string, unknown>;
 
+// Test projects need the TEST- prefix in X-CleverTap-Account-Id; people often
+// leave it off (or add it to a live project). When CleverTap rejects the ID we
+// try the other spelling once and remember whichever works.
+const workingAccountId = new Map<string, string>();
+
 async function call(creds: CtCredentials, method: "GET" | "POST", path: string, body?: Json, attempt = 0): Promise<Json> {
+  const given = creds.accountId.trim();
+  const known = workingAccountId.get(given);
+  if (known) return callOnce({ ...creds, accountId: known }, method, path, body, attempt);
+  try {
+    return await callOnce(creds, method, path, body, attempt);
+  } catch (e) {
+    if (!(e instanceof CtApiError) || e.kind !== "auth") throw e;
+    const other = otherAccountSpelling(given);
+    try {
+      const json = await callOnce({ ...creds, accountId: other }, method, path, body, attempt);
+      workingAccountId.set(given, other);
+      return json;
+    } catch {
+      throw e; // report the original rejection
+    }
+  }
+}
+
+async function callOnce(creds: CtCredentials, method: "GET" | "POST", path: string, body?: Json, attempt = 0): Promise<Json> {
   const headers: Record<string, string> = {
     "X-CleverTap-Account-Id": creds.accountId.trim(),
     "X-CleverTap-Passcode": creds.passcode,
@@ -58,7 +83,7 @@ async function call(creds: CtCredentials, method: "GET" | "POST", path: string, 
   // Concurrency limit (3 parallel requests per account) — back off and retry.
   if (res.status === 429 && attempt < 3) {
     await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
-    return call(creds, method, path, body, attempt + 1);
+    return callOnce(creds, method, path, body, attempt + 1);
   }
 
   let json: Json = {};
@@ -72,7 +97,12 @@ async function call(creds: CtCredentials, method: "GET" | "POST", path: string, 
 
   if (!res.ok || status === "fail") {
     if (res.status === 401 || /invalid credentials|passcode|account id/i.test(msg))
-      throw new CtApiError("CleverTap rejected the Account ID / Passcode.", "auth", res.status, json.code as number);
+      throw new CtApiError(
+        "CleverTap rejected the Account ID / Passcode (we tried with and without the TEST- prefix). Copy both from Settings → Project — on the test dashboard for a test project — and check the region.",
+        "auth",
+        res.status,
+        json.code as number,
+      );
     if (/account blocked/i.test(msg))
       throw new CtApiError("Account not found in this region (or blocked) — check the region.", "region", res.status);
     if (res.status === 429) throw new CtApiError("CleverTap API concurrency limit hit — retry in a minute.", "limit", 429);

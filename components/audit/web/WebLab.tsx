@@ -7,6 +7,7 @@ import type { Audit } from "@/lib/types";
 import type { TestPushRecord } from "@/lib/clevertap/types";
 import { Card, Button, Notice, StatusMark } from "@/components/ui";
 import { formatDate } from "@/lib/format";
+import { sameAccount } from "@/lib/account";
 import { LiveSession } from "./LiveSession";
 
 // Website tests: re-run the website check (optionally with a test login),
@@ -294,7 +295,7 @@ function ScanFacts({ audit }: { audit: Audit }) {
   const s = audit.webScan!;
   const facts: [string, string, boolean | undefined][] = [
     ["CleverTap SDK", s.sdk.present ? `${s.sdk.loading === "head" ? "in <head>" : s.sdk.loading === "bundle" ? "npm bundle" : "script tag"}${s.sdk.version ? ` · v${s.sdk.version}` : ""}` : "not found", s.sdk.present],
-    ["Account · region", s.sdk.accountId ? `${s.sdk.accountId} · ${s.sdk.region ?? "?"}` : "—", s.sdk.accountId ? s.sdk.accountId.toUpperCase() === (audit.accountId ?? "").toUpperCase() : undefined],
+    ["Account · region", s.sdk.accountId ? `${s.sdk.accountId} · ${s.sdk.region ?? "?"}` : "—", s.sdk.accountId ? sameAccount(s.sdk.accountId, audit.accountId ?? "") : undefined],
     ["Requests accepted", `${s.network.accepted} of ${s.network.requests}`, s.network.requests ? s.network.accepted === s.network.requests : undefined],
     ["UTM test", s.utm.sent ? "sent with the page view" : `not sent (landed on ${s.utm.landedOn ?? "?"})`, s.utm.sent],
     ["Service worker", `${s.webPush.serviceWorkerPath} · ${s.webPush.serviceWorker.clevertap ? "CleverTap" : s.webPush.serviceWorker.reachable ? "not CleverTap" : "missing"}`, s.webPush.serviceWorker.clevertap],

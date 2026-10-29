@@ -260,6 +260,16 @@ export async function assertConsent(id: string) {
     throw new HttpError(403, "Accept the data & privacy notice on this audit first (shown at the top of the test steps).");
 }
 
+/**
+ * Point the audit at a different CleverTap project (e.g. the test project the
+ * app actually sends to). The old project's API results no longer apply.
+ */
+export async function setAccountId(id: string, accountId: string) {
+  const { error } = await db().from("audits").update({ account_id: accountId, api: null }).eq("id", id);
+  if (error) fail(error, "save account id");
+  await recompute(id);
+}
+
 /** Record the data & privacy consent on an audit (older audits accept it from the report). */
 export async function setConsent(id: string, consent: import("../consent").Consent) {
   const row = await getRow(id);

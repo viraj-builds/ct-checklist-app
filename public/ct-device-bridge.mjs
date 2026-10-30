@@ -17,6 +17,7 @@
 //   - no dependencies; needs Node 18+ and Android platform-tools (adb)
 
 import http from "node:http";
+import net from "node:net";
 import { execFile } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -30,7 +31,7 @@ const flag = (name, def) => {
 const PORT = Number(flag("--port", "47811"));
 const ORIGINS = new Set(["http://localhost:3000", ...flag("--origin", "").split(",").filter(Boolean)].map((o) => o.replace(/\/$/, "")));
 const TOKEN = randomBytes(12).toString("hex");
-const HELPER_VERSION = 5; // bump when the command list changes (lib/device/drivers.ts HELPER_MIN_VERSION)
+const HELPER_VERSION = 6; // bump when the command list changes (lib/device/drivers.ts HELPER_MIN_VERSION)
 
 function findAdb() {
   const exe = process.platform === "win32" ? "adb.exe" : "adb";
@@ -52,7 +53,75 @@ function findAdb() {
   }
   return exe;
 }
-const ADB = findAdb();
+// The first adb found; at start-up we switch to the NEWEST copy on the machine
+// (an old Android Studio adb in ~/Library/Android/sdk shouldn't win over a new one).
+let ADB = process.env.ADB_PATH || findAdb();
+const MIN_TOOLS = [33, 0, 0]; // wireless pairing works from 30; older than 33 often fails with "protocol fault"
+
+// Every adb on this machine (SDK folders + PATH). Two different versions (e.g.
+// Android Studio's and Homebrew's) keep restarting each other's background
+// server, which breaks pairing with "protocol fault".
+let adbCopies;
+async function adbVersions() {
+  if (adbCopies) return adbCopies;
+  const exe = process.platform === "win32" ? "adb.exe" : "adb";
+  const home = process.env.HOME || process.env.USERPROFILE;
+  const dirs = [process.env.ANDROID_HOME, process.env.ANDROID_SDK_ROOT,
+    process.platform === "win32" && process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, "Android", "Sdk"),
+    home && join(home, "Library", "Android", "sdk"),
+    home && join(home, "Android", "Sdk")].filter(Boolean).map((r) => join(r, "platform-tools"));
+  const extra = process.platform === "win32" ? [] : ["/opt/homebrew/bin/adb", "/usr/local/bin/adb"]; // Homebrew (Apple silicon / Intel)
+  const paths = [...new Set([ADB, ...dirs.map((d) => join(d, exe)), ...extra, ...(process.env.PATH || "").split(delimiter).filter(Boolean).map((d) => join(d, exe))])].filter((p) => existsSync(p));
+  adbCopies = [];
+  for (const p of paths) {
+    // "Version 35.0.2-12147458" = platform-tools version (the "1.0.41" line is the same for every modern adb)
+    const v = await new Promise((resolve) =>
+      execFile(p, ["version"], { timeout: 8000, windowsHide: true }, (err, out) => resolve(err ? "" : String(out).match(/^Version (\d+\.\d+\.\d+)/m)?.[1] ?? String(out).match(/version ([\d.]+)/)?.[1] ?? "")));
+    if (v) adbCopies.push({ path: p, version: v });
+  }
+  return adbCopies;
+}
+
+/**
+ * Can this computer open a connection to the phone's port at all? adb only says
+ * "protocol fault (couldn't read status message)" when it can't — on a Mac that's
+ * usually the Local Network permission, elsewhere a different / guest network.
+ */
+function reachable(host, port, ms = 4000) {
+  return new Promise((resolve) => {
+    const s = net.connect({ host, port });
+    const done = (ok, why) => {
+      s.destroy();
+      resolve({ ok, why });
+    };
+    s.setTimeout(ms, () => done(false, "timed out"));
+    s.once("connect", () => done(true));
+    s.once("error", (e) => done(false, e.code || e.message));
+  });
+}
+
+const versionParts = (v) => v.split(".").map((n) => Number(n) || 0);
+const newer = (a, b) => {
+  const x = versionParts(a), y = versionParts(b);
+  for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0);
+  return false;
+};
+const tooOld = (v) => !newer(v, MIN_TOOLS.join(".")) && v !== MIN_TOOLS.join(".");
+
+/** Use the newest adb found (unless ADB_PATH says which one). */
+async function pickNewestAdb() {
+  const copies = await adbVersions();
+  if (process.env.ADB_PATH || !copies.length) return;
+  ADB = copies.reduce((best, c) => (newer(c.version, best.version) ? c : best)).path;
+}
+const adbVersionOf = (path) => adbCopies?.find((c) => c.path === path)?.version;
+
+/** Restart adb's background server from OUR adb (fixes a server started by another adb version). */
+async function restartAdbServer() {
+  await adb(["kill-server"], 10_000).catch(() => "");
+  await adb(["start-server"], 20_000).catch(() => "");
+  await new Promise((r) => setTimeout(r, 1000));
+}
 
 function adb(argv, timeout = 60_000) {
   return new Promise((resolve, reject) => {
@@ -195,7 +264,21 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
     if (req.method === "GET" && url.pathname === "/v1/status") {
       const version = (await adb(["version"])).split("\n")[0].trim();
-      return send(res, 200, { adb: version, devices: await devices() }, allowed);
+      const copies = await adbVersions();
+      const versions = [...new Set(copies.map((c) => c.version))];
+      const mine = adbVersionOf(ADB);
+      const warn = [
+        mine && tooOld(mine)
+          ? `This adb (platform-tools ${mine}) is too old for reliable Wi-Fi pairing. Install the latest: on a Mac “brew install --cask android-platform-tools”, or update “Android SDK Platform-Tools” in Android Studio's SDK Manager — then restart the helper.`
+          : "",
+        versions.length > 1 ? `Several adb versions on this computer: ${copies.map((c) => `${c.version} (${c.path})`).join(", ")} — we use the newest. If pairing fails, close Android Studio / other adb tools.` : "",
+      ].filter(Boolean).join(" ");
+      return send(res, 200, {
+        adb: mine ? `${version} · platform-tools ${mine}` : version,
+        adbPath: ADB,
+        adbWarning: warn || undefined,
+        devices: await devices(),
+      }, allowed);
     }
     if (req.method === "POST" && url.pathname === "/v1/run") {
       const { serial, op } = await readJson(req);
@@ -206,7 +289,17 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/v1/pair") {
       const { host, port, code } = await readJson(req);
       if (!HOST.test(String(host)) || !(port > 0 && port < 65536) || !/^\d{6}$/.test(String(code))) throw new Error("Enter the IP, port and 6-digit code shown on the phone.");
-      const output = await adb(["pair", `${host}:${port}`, String(code)], 30_000);
+      const r = await reachable(host, port);
+      if (!r.ok) throw new Error(`Can't reach the phone at ${host}:${port} (${r.why}).`);
+      const pairOnce = () => adb(["pair", `${host}:${port}`, String(code)], 30_000).catch((e) => e.message);
+      let output = await pairOnce();
+      // "protocol fault" usually means adb's background server was started by another
+      // adb version (or got stuck): restart it from our adb and try the same code again.
+      if (/protocol fault|cannot connect to daemon|server version/i.test(output)) {
+        console.log(`  Pairing hit "${output.trim()}" — restarting the adb server and retrying once…`);
+        await restartAdbServer();
+        output = await pairOnce();
+      }
       if (!/Successfully paired/i.test(output)) throw new Error(output.trim() || "Pairing failed — check the code and port.");
       // After pairing, the phone announces its connect port over mDNS. Connect
       // to it ourselves so the user doesn't have to type a second port.
@@ -223,6 +316,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/v1/connect") {
       const { host, port } = await readJson(req);
       if (!HOST.test(String(host)) || !(port > 0 && port < 65536)) throw new Error("Enter the IP and port shown under Wireless debugging.");
+      const reach = await reachable(host, port);
+      if (!reach.ok) return send(res, 200, { output: `Can't reach the phone at ${host}:${port} (${reach.why}).` }, allowed);
       let output = await adb(["connect", `${host}:${port}`], 30_000).catch((e) => e.message);
       // "protocol fault (couldn't read status message)" is often a one-off — retry once
       if (/protocol fault/i.test(output)) {
@@ -238,8 +333,15 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", async () => {
+  await pickNewestAdb().catch(() => {});
   let adbInfo = "";
-  try { adbInfo = (await adb(["version"])).split("\n")[0].trim(); } catch { adbInfo = "NOT FOUND — install Android platform-tools"; }
+  try {
+    const tools = adbVersionOf(ADB);
+    adbInfo = `${(await adb(["version"])).split("\n")[0].trim()}${tools ? ` · platform-tools ${tools}` : ""} · ${ADB}`;
+    if (tools && tooOld(tools)) adbInfo += "\n            ⚠ too old for Wi-Fi pairing — install the latest platform-tools (Mac: brew install --cask android-platform-tools)";
+  } catch {
+    adbInfo = "NOT FOUND — install Android platform-tools (Mac: brew install --cask android-platform-tools · Windows: winget install Google.PlatformTools)";
+  }
   console.log("\n  CleverTap audit device helper is running");
   console.log(`  adb:      ${adbInfo}`);
   console.log(`  allowed:  ${[...ORIGINS].join(", ")}`);

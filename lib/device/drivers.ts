@@ -128,7 +128,7 @@ async function helper<T>(token: string, path: string, body?: unknown): Promise<T
   return json as T;
 }
 
-export const HELPER_MIN_VERSION = 5; // must match HELPER_VERSION in public/ct-device-bridge.mjs
+export const HELPER_MIN_VERSION = 6; // must match HELPER_VERSION in public/ct-device-bridge.mjs
 
 /** Ask a running helper for its token (only answered for the audit site's own origin). */
 export async function helperHello(): Promise<{ token: string; version: number } | null> {
@@ -143,7 +143,7 @@ export async function helperHello(): Promise<{ token: string; version: number } 
 }
 
 export const helperStatus = (token: string) =>
-  helper<{ adb: string; devices: HelperDevice[] }>(token, "/v1/status");
+  helper<{ adb: string; adbPath?: string; adbWarning?: string; devices: HelperDevice[] }>(token, "/v1/status");
 
 export const helperPair = (token: string, host: string, port: number, code: string) =>
   helper<{ output: string; connected?: boolean }>(token, "/v1/pair", { host, port, code });

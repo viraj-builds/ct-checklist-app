@@ -585,6 +585,7 @@ function HelperConnect({
 }) {
   const [token, setToken] = useState("");
   const [devices, setDevices] = useState<HelperDevice[] | null>(null);
+  const [adbInfo, setAdbInfo] = useState<{ line: string; path?: string; warning?: string } | null>(null);
   const [ip, setIp] = useState("");
   const [pairPort, setPairPort] = useState("");
   const [code, setCode] = useState("");
@@ -628,8 +629,10 @@ function HelperConnect({
         setToken(t);
       }
       try {
-        const list = (await helperStatus(t)).devices;
+        const st = await helperStatus(t);
+        const list = st.devices;
         if (!alive) return;
+        setAdbInfo({ line: st.adb, path: st.adbPath, warning: st.adbWarning });
         setDevices(list);
         // the same phone can be listed twice — count phones, not connections
         const ready = uniquePhones(list).filter((d) => d.state === "device");
@@ -683,9 +686,22 @@ function HelperConnect({
       )}
       <div className="rounded-xl border p-4">
         {token ? (
-          <span className="flex items-center gap-2.5 text-[15px] font-bold" style={{ color: "var(--pass)" }}>
-            <StatusMark status="pass" size={22} /> The helper is running
-          </span>
+          <>
+            <span className="flex items-center gap-2.5 text-[15px] font-bold" style={{ color: "var(--pass)" }}>
+              <StatusMark status="pass" size={22} /> The helper is running
+            </span>
+            {adbInfo && (
+              <span className="mt-1 block break-all text-[13px] text-muted">
+                {adbInfo.line}
+                {adbInfo.path ? ` · ${adbInfo.path}` : ""}
+              </span>
+            )}
+            {adbInfo?.warning && (
+              <Notice tone="warn" className="mt-3">
+                {adbInfo.warning}
+              </Notice>
+            )}
+          </>
         ) : (
           <>
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -925,11 +941,18 @@ function portOf(v: string): number | undefined {
 /** Turn adb's "failed to connect" answers into what to do next. */
 function connectHelp(output: string, host: string, os: "win" | "mac" = "win", pairing = false): string {
   const o = output.trim();
+  // the helper checked the phone's port can't be opened at all (before adb tried)
+  if (/can't reach the phone/i.test(o))
+    return os === "mac"
+      ? `This Mac can't reach the phone at ${host}. Most often macOS is blocking it: System Settings → Privacy & Security → Local Network → turn on Terminal (or the app running the helper), then stop the helper (Ctrl+C) and start it again. Also check both are on the same Wi-Fi (not a guest network), any VPN is off, and the IP and port match the phone's screen right now. (${o})`
+      : `This computer can't reach the phone at ${host}. Check both are on the same Wi-Fi (not a guest network), any VPN is off, Windows Firewall allows Node.js / adb on private networks, and the IP and port match the phone's screen right now${pairing ? " (the pairing pop-up's port only works while that pop-up is open)" : ""}. (${o})`;
   // macOS 15+ blocks local-network connections from apps without the Local Network permission
   if (os === "mac" && /no route to host|host is down|not permitted|EHOSTUNREACH|EPERM/i.test(o))
     return `macOS is blocking the connection to the phone. System Settings → Privacy & Security → Local Network → turn on Terminal (or the app you started the helper from), then restart the helper and try again. (${o})`;
   const twoAdbs =
     "If Android Studio, scrcpy or another adb tool is open, close it — two adb versions keep resetting each other — then run “adb kill-server” and try again.";
+  if (pairing && os === "mac" && /protocol fault/i.test(o))
+    return `Pairing didn't complete on this Mac (we already restarted adb and retried). Check, in this order: 1) System Settings → Privacy & Security → Local Network → Terminal (or the app running the helper) is ON — then stop the helper (Ctrl+C) and start it again; 2) ${twoAdbs} 3) on the phone, open “Pair device with pairing code” again and use the new code and port. (${o})`;
   if (pairing && /wrong password|protocol fault|unable to start pairing/i.test(o))
     return `Pairing failed — the code or pairing port didn't match. Tap “Pair device with pairing code” again on the phone and use the new code and port (they change each time). ${twoAdbs} (${o})`;
   if (!pairing && /protocol fault/i.test(o))

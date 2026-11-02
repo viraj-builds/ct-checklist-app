@@ -14,6 +14,18 @@ const background = z.object({
   autoStart: z.enum(["allowed", "denied"]).optional(),
   hints: z.array(short).max(6),
 });
+const linkTap = z.object({
+  at: z.number(),
+  url: z.string().max(500),
+  clicked: z.boolean(),
+  landed: short.optional(),
+  openedOutsideApp: z.boolean().optional(),
+  baseline: short.optional(),
+  screenChanged: z.boolean().optional(),
+  uiReadable: z.boolean().optional(),
+  urlShown: z.boolean().optional(),
+  confirmed: z.boolean().optional(),
+});
 const pushTest = z.object({
   status: z.enum(["delivered", "not-delivered", "error"]),
   verifiedState: z.boolean(),
@@ -112,8 +124,8 @@ const Findings = z.object({
         .optional(),
       linkTaps: z
         .object({
-          internal: z.object({ at: z.number(), url: z.string().max(500), clicked: z.boolean(), landed: short.optional(), openedOutsideApp: z.boolean().optional() }).optional(),
-          external: z.object({ at: z.number(), url: z.string().max(500), clicked: z.boolean(), landed: short.optional(), openedOutsideApp: z.boolean().optional() }).optional(),
+          internal: linkTap.optional(),
+          external: linkTap.optional(),
         })
         .optional(),
     })

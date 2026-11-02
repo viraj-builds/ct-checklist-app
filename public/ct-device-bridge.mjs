@@ -31,7 +31,7 @@ const flag = (name, def) => {
 const PORT = Number(flag("--port", "47811"));
 const ORIGINS = new Set(["http://localhost:3000", ...flag("--origin", "").split(",").filter(Boolean)].map((o) => o.replace(/\/$/, "")));
 const TOKEN = randomBytes(12).toString("hex");
-const HELPER_VERSION = 6; // bump when the command list changes (lib/device/drivers.ts HELPER_MIN_VERSION)
+const HELPER_VERSION = 7; // bump when the command list changes (lib/device/drivers.ts HELPER_MIN_VERSION)
 
 function findAdb() {
   const exe = process.platform === "win32" ? "adb.exe" : "adb";
@@ -185,6 +185,8 @@ function buildCommand(op) {
     case "setTagLevel":
       if (typeof op.tag !== "string" || !/^[A-Za-z0-9_.:-]{1,60}$/.test(op.tag)) throw new Error("Invalid log tag.");
       return `setprop 'log.tag.${op.tag}' '${level(op.level)}'`;
+    case "uiDump": return "for i in 1 2 3; do uiautomator dump /data/local/tmp/ct_ui.xml >/dev/null 2>&1 && break; sleep 1; done; cat /data/local/tmp/ct_ui.xml 2>/dev/null; rm -f /data/local/tmp/ct_ui.xml";
+    case "screenshot": return "screencap -p /data/local/tmp/ct_s.png 2>/dev/null && base64 /data/local/tmp/ct_s.png 2>/dev/null; rm -f /data/local/tmp/ct_s.png";
     case "findLog": return `logcat -d -v brief | grep -F '${marker(op.marker)}' | tail -n 5 || true`;
     default: throw new Error("Unknown operation.");
   }

@@ -514,10 +514,17 @@ const RULES: Record<string, Rule> = {
     const tap = dev?.logScenarios?.linkTaps?.internal ?? dev?.logScenarios?.linkTap;
     const a12 = android12ClickHook(s);
     if (tap && !/^https?:/i.test(tap.url) && tap.clicked && tap.landed) {
+      const route = "Make the push-click handler navigate to the screen in the link (native: start that Activity; Flutter / React Native: route on wzrk_dl in the CleverTap push-clicked callback).";
       if (tap.openedOutsideApp)
         return res("fail", "Opened outside the app", `Tapped a push with ${tap.url}; it opened ${tap.landed}.`, "device", { remediation: faqFix(9) });
-      if (a12) return res("warn", `Opened ${short(tap.landed)} — click hook missing`, a12.evidence, "device", { remediation: a12.fix });
-      return res("pass", `Opened ${short(tap.landed)}`, `Tapped a push with ${tap.url}; it opened inside the app. Check it's the intended screen.`, "device");
+      if (tap.confirmed === false)
+        return res("fail", "Opened the wrong screen", `Tapped a push with ${tap.url}; the app opened, but you said it isn't the right screen.`, "device", { remediation: route });
+      if (tap.confirmed !== true && tap.screenChanged === false)
+        return res("fail", "App opened but didn't navigate", `Tapped a push with ${tap.url}; the app came to the front but stayed on the same screen as before.`, "device", { remediation: route });
+      if (tap.confirmed !== true && tap.screenChanged !== true)
+        return res("manual", "App opened — confirm the screen", "The app opened from the push. Look at the screenshot in step 4 and press Yes if it's the screen the link should open.", "device");
+      if (a12) return res("warn", "Opened the right screen — click hook missing", a12.evidence, "device", { remediation: a12.fix });
+      return res("pass", tap.confirmed ? "Right screen (confirmed)" : "Navigated to a new screen", `Tapped a push with ${tap.url}; the phone moved to ${tap.confirmed ? "the screen you confirmed" : "a different screen than before the tap"}.`, "device");
     }
     const tested = (dev?.deepLinks ?? []).filter((x) => !/^https?:/i.test(x.url));
     if (tested.length) {
@@ -542,12 +549,16 @@ const RULES: Record<string, Rule> = {
   "app-t3-deeplink-external": ({ s, d }) => {
     const t = d?.logScenarios?.linkTaps?.external ?? d?.logScenarios?.linkTap;
     if (t && /^https?:/i.test(t.url)) {
-      if (t.clicked && t.landed)
-        return res("pass", `Opened ${short(t.landed.split("/")[0])}`, `Tapped a push with ${t.url}; it opened ${t.landed}${t.openedOutsideApp ? " (outside the app, as expected for an external URL)" : ""}.`, "device", {
-          details: t.openedOutsideApp
-            ? ["Android 12+: CleverTap can't record Notification Clicked when the link opens another app (browser) — that's an OS limit, not a bug."]
-            : [],
-        });
+      if (t.clicked && t.landed) {
+        const note = t.openedOutsideApp ? ["Android 12+: CleverTap can't record Notification Clicked when the link opens another app (browser) — that's an OS limit, not a bug."] : [];
+        if (t.confirmed === false)
+          return res("fail", "Opened the wrong page", `Tapped a push with ${t.url}; you said the page that opened isn't the right one.`, "device", { remediation: faqFix(9) });
+        if (t.confirmed === true || (t.openedOutsideApp && t.urlShown === true))
+          return res("pass", t.confirmed ? "Right page (confirmed)" : "Website opened", `Tapped a push with ${t.url}; ${t.openedOutsideApp ? "the browser shows that website" : "it opened in the app"}.`, "device", { details: note });
+        if (t.openedOutsideApp && t.urlShown === false)
+          return res("warn", "Browser opened another page", `Tapped a push with ${t.url}; the browser opened but doesn't show that website. Check the screenshot in step 4.`, "device", { details: note });
+        return res("manual", "Opened — confirm the page", `Tapped a push with ${t.url}; it opened ${short(t.landed.split("/")[0])}. Look at the screenshot in step 4 and press Yes if it's the right page.`, "device", { details: note });
+      }
       if (t.clicked) return res("warn", "Clicked — landing unknown", "The click was recorded but we couldn't read which screen opened.", "device");
     }
     if (!s) return res("manual", "Not checked", NO_SCAN, "none");

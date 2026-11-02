@@ -77,6 +77,10 @@ export function buildCommand(op: DeviceOp): string {
     case "setTagLevel":
       if (!/^[A-Za-z0-9_.:-]{1,60}$/.test(op.tag) || !/^[A-Za-z]{0,10}$/.test(op.level)) throw new Error("Invalid log tag.");
       return `setprop 'log.tag.${op.tag}' '${op.level}'`;
+    case "uiDump":
+      return "for i in 1 2 3; do uiautomator dump /data/local/tmp/ct_ui.xml >/dev/null 2>&1 && break; sleep 1; done; cat /data/local/tmp/ct_ui.xml 2>/dev/null; rm -f /data/local/tmp/ct_ui.xml";
+    case "screenshot":
+      return "screencap -p /data/local/tmp/ct_s.png 2>/dev/null && base64 /data/local/tmp/ct_s.png 2>/dev/null; rm -f /data/local/tmp/ct_s.png";
     case "findLog":
       if (!MARKER.test(op.marker)) throw new Error("Invalid marker.");
       return `logcat -d -v brief | grep -F '${op.marker}' | tail -n 5 || true`;

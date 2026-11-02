@@ -4,7 +4,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { DeviceDriver } from "@/lib/device/drivers";
 import { mergeInsights, parseCtLog, type LogInsights } from "@/lib/device/ctlog";
 import type { LoggingState, LogScenarios } from "@/lib/device/types";
-import { linkKind } from "@/lib/device/types";
+import { linkKind, type LinkTap } from "@/lib/device/types";
+import { readScreen, screenDiff, screenshot, showsHost, type ScreenRead } from "@/lib/device/screen";
 import { ctTags, detectOem, liftLogging, readyScreen } from "@/lib/device/oem";
 import { parseProps } from "@/lib/device/runner";
 import { Button, Card, Notice, StatusMark } from "@/components/ui";
@@ -54,7 +55,7 @@ export function LogSession({
   const [ins, setIns] = useState<LogInsights | null>(initial?.logs ?? null);
   const [sc, setSc] = useState<LogScenarios>(initial?.logScenarios ?? {});
   const [restricted, setRestricted] = useState(!!initial?.logTagWasRestricted);
-  const [waiting, setWaiting] = useState<"" | "relaunch" | "restart" | "sending" | "tap">("");
+  const [waiting, setWaiting] = useState<"" | "relaunch" | "restart" | "sending" | "tap" | "checking">("");
   const [url, setUrl] = useState("https://www.clevertap.com");
   const [err, setErr] = useState("");
   const [logging, setLogging] = useState<LoggingState | undefined>(initial?.logging);
@@ -71,6 +72,9 @@ export function LogSession({
   const tapMarker = useRef("");
   const tapSeenInShade = useRef(false);
   const tapStartedAt = useRef(0);
+  const baseline = useRef<ScreenRead | null>(null); // the app's screen before the tap
+  const [shot, setShot] = useState<string | undefined>(); // screenshot after the tap (browser only)
+  const [seen, setSeen] = useState<string[]>([]); // a few texts visible after the tap (browser only)
 
   const read = async () => parseCtLog(await driver.run({ t: "ctLogcat" }));
 
@@ -110,12 +114,37 @@ export function LogSession({
           if (inShade) tapSeenInShade.current = true;
           const tapped = !!click || (tapSeenInShade.current && !inShade);
           if (tapped) {
-            await sleep(2500);
-            const landed = topActivity(await driver.run({ t: "focus" }));
-            setSc((s) => {
-              const tap = { at: Date.now(), url, clicked: true, landed, openedOutsideApp: landed ? !landed.startsWith(pkg + "/") : undefined };
-              return { ...s, linkTap: tap, linkTaps: { ...s.linkTaps, [linkKind(url)]: tap } };
-            });
+            setWaiting("checking");
+            await sleep(3000); // let the target screen draw
+            const after = await readScreen(driver);
+            const landed = after.activity;
+            const outside = landed ? !landed.startsWith(pkg + "/") : undefined;
+            const base = baseline.current;
+            // inside the app: did the screen really change? Different activity (native
+            // multi-screen apps) or clearly different visible content (Flutter, RN, Cordova…)
+            const own = after.texts.length && !outside ? (await readScreen(driver, pkg)).texts : [];
+            let screenChanged: boolean | undefined;
+            if (!outside && base) {
+              if (base.activity && landed && base.activity !== landed) screenChanged = true;
+              else if (base.readable && own.length) {
+                const diff = screenDiff(base.texts, own);
+                screenChanged = diff >= 0.5 ? true : diff <= 0.15 ? false : undefined;
+              }
+            }
+            const tap: LinkTap = {
+              at: Date.now(),
+              url,
+              clicked: true,
+              landed,
+              openedOutsideApp: outside,
+              baseline: base?.activity,
+              screenChanged,
+              uiReadable: after.readable,
+              urlShown: outside ? showsHost(after.texts, url) : undefined,
+            };
+            setSeen((outside ? after.texts : own).slice(0, 8));
+            setShot(await screenshot(driver));
+            setSc((s) => ({ ...s, linkTap: tap, linkTaps: { ...s.linkTaps, [linkKind(url)]: tap } }));
             setWaiting("");
           } else if (Date.now() - tapStartedAt.current > 3 * 60_000) {
             setWaiting("");
@@ -274,6 +303,14 @@ export function LogSession({
     }
   }
 
+  function confirmTap(ok: boolean) {
+    setSc((s) => {
+      if (!s.linkTap) return s;
+      const tap = { ...s.linkTap, confirmed: ok };
+      return { ...s, linkTap: tap, linkTaps: { ...s.linkTaps, [linkKind(tap.url)]: tap } };
+    });
+  }
+
   async function sendLink() {
     setErr("");
     setWaiting("sending");
@@ -282,6 +319,13 @@ export function LogSession({
       tapMarker.current = Math.random().toString(36).slice(2, 10);
       tapSeenInShade.current = false;
       tapStartedAt.current = Date.now();
+      setShot(undefined);
+      setSeen([]);
+      // what the app shows before the tap — to prove the link moved it somewhere else
+      await driver.run({ t: "launch", pkg });
+      await sleep(2500);
+      baseline.current = await readScreen(driver, pkg).catch(() => null);
+      await driver.run({ t: "home" });
       await sendPush(url.trim(), tapMarker.current);
       setSc((s) => ({ ...s, linkTap: undefined })); // a new send replaces the last result
       setWaiting("tap");
@@ -300,7 +344,7 @@ export function LogSession({
   const okB = logins.some((l) => l.kind !== "aborted" && l.kind !== "failed") || identified.length > 0 ? true : undefined;
   const okC = sc.relaunch ? sc.relaunch.onUserLoginOnStart : undefined;
   const okD = customEvents.length ? customEvents.every((e) => e.issues.length === 0) : undefined;
-  const okE = sc.linkTap ? sc.linkTap.clicked && !!sc.linkTap.landed : undefined;
+  const okE = sc.linkTap ? tapVerdict(sc.linkTap, pkg).ok : undefined;
   const okF = ins?.inApp?.errors.length ? false : ins?.inApp?.shown ? true : undefined;
   const cur = !active ? "" : (["a", "b", "c", "d", "e", "f"] as const).find((k) => ({ a: okA, b: okB, c: okC, d: okD, e: okE, f: okF })[k] !== true) ?? "";
 
@@ -424,9 +468,12 @@ export function LogSession({
             sc.linkTap
               ? [
                   ["Link", sc.linkTap.url],
-                  ["Opened", sc.linkTap.landed ? `${sc.linkTap.landed}${sc.linkTap.openedOutsideApp ? " (outside the app)" : ""}` : "unknown"],
+                  ["Opened", sc.linkTap.landed ? `${appName(sc.linkTap.landed, pkg)}${sc.linkTap.openedOutsideApp ? " (outside your app)" : ""}` : "unknown"],
+                  ["Result", tapVerdict(sc.linkTap, pkg).text],
                 ]
-              : waiting === "sending"
+              : waiting === "checking"
+                ? [["Checking", "Reading what's on the phone's screen…"]]
+                : waiting === "sending"
                 ? [["Sending", "Asking CleverTap to send the push — this can take 10–20 s…"]]
                 : waiting === "tap"
                   ? [["Sent", "Tap the notification on the phone…"]]
@@ -456,6 +503,32 @@ export function LogSession({
                 </Button>
               )}
               {canSendPush && <span className="w-full text-sm text-muted">{canSendPush}</span>}
+              {sc.linkTap && !waiting && (
+                <div className="w-full space-y-2 rounded-lg border bg-surface-2 p-2.5">
+                  <div className="flex gap-3">
+                    {shot && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={shot} alt="The phone's screen after the tap" className="h-48 w-auto shrink-0 rounded border object-contain" />
+                    )}
+                    <div className="min-w-0 space-y-1.5 text-sm">
+                      {seen.length > 0 && (
+                        <p className="text-muted">
+                          On screen: <span className="text-text">{seen.slice(0, 6).join(" · ")}</span>
+                        </p>
+                      )}
+                      <p className="font-medium">Is this the screen the link should open?</p>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant={sc.linkTap.confirmed === true ? "primary" : "secondary"} onClick={() => confirmTap(true)}>
+                          ✓ Yes
+                        </Button>
+                        <Button size="sm" variant={sc.linkTap.confirmed === false ? "primary" : "secondary"} onClick={() => confirmTap(false)}>
+                          ✗ No
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           }
         />
@@ -571,12 +644,28 @@ function Hint({ title, children, tone }: { title: string; children: ReactNode; t
   );
 }
 
-// "u0 com.android.chrome/org.chromium.chrome.browser.ChromeTabbedActivity t12" → package/activity on screen
-function topActivity(focus: string): string | undefined {
-  const pick = (re: RegExp) => focus.match(re)?.[1];
-  return (
-    pick(/topResumedActivity=ActivityRecord\{\S+ u\d+ (\S+\/\S+)/) ??
-    pick(/mResumedActivity: ActivityRecord\{\S+ u\d+ (\S+\/\S+)/) ??
-    pick(/mCurrentFocus=Window\{\S+ \S+ ([^}\s]+\/[^}\s]+)\}/)
-  );
+
+// What the tap proved, in plain words. The user's answer on the screenshot wins.
+export function tapVerdict(t: LinkTap, pkg: string): { ok?: boolean; text: string } {
+  if (t.confirmed === false) return { ok: false, text: "Wrong screen (you said No)" };
+  if (t.confirmed === true) return { ok: true, text: "Right screen (you confirmed)" };
+  const external = /^https?:/i.test(t.url);
+  if (!t.landed) return { text: "Couldn't read the screen — check the screenshot" };
+  if (external) {
+    if (t.openedOutsideApp && t.urlShown === true) return { ok: true, text: "Website opened ✓" };
+    if (t.openedOutsideApp && t.urlShown === false) return { text: "Browser opened, but it doesn't show this website — check the screenshot" };
+    if (t.openedOutsideApp) return { text: "Opened outside the app — confirm it's the right page" };
+  } else if (t.openedOutsideApp) return { ok: false, text: "Opened outside your app ✗" };
+  if (t.landed.startsWith(pkg + "/")) {
+    if (t.screenChanged === true) return { ok: true, text: "Moved to a new screen ✓" };
+    if (t.screenChanged === false) return { ok: false, text: "App opened but stayed on the same screen ✗" };
+    return { text: "App opened — confirm it's the right screen" };
+  }
+  return { text: "Confirm on the screenshot" };
+}
+
+function appName(landed: string, pkg: string) {
+  if (landed.startsWith(pkg + "/")) return `your app (${landed.split("/")[1]?.replace(/^\./, "") ?? ""})`;
+  const p = landed.split("/")[0];
+  return /chrome|browser|firefox|opera|edge|samsung\.android\.app\.sbrowser/i.test(p) ? `browser (${p})` : p;
 }

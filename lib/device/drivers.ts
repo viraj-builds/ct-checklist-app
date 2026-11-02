@@ -128,7 +128,7 @@ async function helper<T>(token: string, path: string, body?: unknown): Promise<T
   return json as T;
 }
 
-export const HELPER_MIN_VERSION = 6; // must match HELPER_VERSION in public/ct-device-bridge.mjs
+export const HELPER_MIN_VERSION = 7; // must match HELPER_VERSION in public/ct-device-bridge.mjs
 
 /** Ask a running helper for its token (only answered for the audit site's own origin). */
 export async function helperHello(): Promise<{ token: string; version: number } | null> {

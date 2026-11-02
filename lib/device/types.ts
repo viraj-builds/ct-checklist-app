@@ -32,7 +32,9 @@ export type DeviceOp =
   | { t: "screen" }
   | { t: "wake" }
   | { t: "findLog"; marker: string }
-  | { t: "setTagLevel"; tag: string; level: string }; // log.tag.<TAG> — survives phones resetting log.tag
+  | { t: "setTagLevel"; tag: string; level: string } // log.tag.<TAG> — survives phones resetting log.tag
+  | { t: "uiDump" } // accessibility tree of what's on screen (text / buttons), any framework
+  | { t: "screenshot" }; // PNG, base64 — shown in the browser only
 
 export interface OemInfo {
   family: "xiaomi" | "vivo" | "oppo" | "huawei" | "samsung" | "other";
@@ -85,6 +87,12 @@ export interface LinkTap {
   clicked: boolean;
   landed?: string;
   openedOutsideApp?: boolean;
+  // proof that the screen really changed, read from the phone's screen itself
+  baseline?: string; // activity shown before the tap
+  screenChanged?: boolean; // visible content differs from before the tap
+  uiReadable?: boolean; // the screen's text could be read (false: games / canvas apps)
+  urlShown?: boolean; // external link: the browser shows the link's website
+  confirmed?: boolean; // the user looked at the screenshot: right screen?
 }
 
 /** http(s) links are "external"; your own scheme (myapp://…) is "internal". */

@@ -16,6 +16,34 @@ const NAV: { href: string; label: string; icon: IconName }[] = [
   { href: "/privacy", label: "Privacy", icon: "shield" },
 ];
 
+// Only shown to admins (ADMIN_EMAILS); /admin and its API 404 for everyone else.
+const ADMIN_NAV = { href: "/admin", label: "Admin", icon: "dashboard" as IconName };
+
+type Me = { email: string; isStaff: boolean; isAdmin: boolean };
+const HEARTBEAT = 2 * 60_000;
+
+// Signed-in user for the sidebar. Re-fetched every couple of minutes while the
+// tab is visible — that heartbeat is what "live users" on /admin counts.
+function useMe() {
+  const [user, setUser] = useState<Me | null>(null);
+  useEffect(() => {
+    const load = () =>
+      fetch("/api/me", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => setUser(j?.user ?? null))
+        .catch(() => {});
+    load();
+    const t = setInterval(() => document.visibilityState === "visible" && load(), HEARTBEAT);
+    const onVisible = () => document.visibilityState === "visible" && load();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+  return user;
+}
+
 // Sidebar width: compact icon rail on every page load, drag the right edge to
 // widen it. Narrower than SNAP snaps back to the icon rail. The width lasts
 // while moving between pages but resets on refresh.
@@ -67,6 +95,8 @@ function NavLink({
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const me = useMe();
+  const nav = me?.isAdmin ? [...NAV, ADMIN_NAV] : NAV;
   const [open, setOpen] = useState(false);
   const [savedWidth, setSavedWidth] = useState(RAIL);
   const [lastOpen, setLastOpen] = useState(DEFAULT_OPEN);
@@ -159,12 +189,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </button>
         </div>
         <nav className="mt-5 flex flex-col gap-1 border-t pt-5" aria-label="Main">
-          {NAV.map((n) => (
+          {nav.map((n) => (
             <NavLink key={n.href} {...n} expanded={expanded} active={isActive(n.href)} />
           ))}
         </nav>
         <div className="mt-auto">
-          <UserChip expanded={expanded} />
+          <UserChip user={me} expanded={expanded} />
         </div>
       </aside>
 
@@ -175,12 +205,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <aside className="absolute left-0 top-0 flex h-full w-64 flex-col border-r bg-surface px-3 py-4 animate-fade-in-up">
             <Brand expanded />
             <nav className="mt-6 flex flex-col gap-1">
-              {NAV.map((n) => (
+              {nav.map((n) => (
                 <NavLink key={n.href} {...n} expanded active={isActive(n.href)} onClick={() => setOpen(false)} />
               ))}
             </nav>
             <div className="mt-auto">
-              <UserChip expanded />
+              <UserChip user={me} expanded />
             </div>
           </aside>
         </div>
@@ -238,25 +268,18 @@ function Brand({ expanded }: { expanded: boolean }) {
   );
 }
 
-function UserChip({ expanded }: { expanded: boolean }) {
-  const [user, setUser] = useState<{ email: string; isStaff: boolean } | null>(null);
-  useEffect(() => {
-    fetch("/api/me", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => setUser(j?.user ?? null))
-      .catch(() => {});
-  }, []);
-
+function UserChip({ user, expanded }: { user: Me | null; expanded: boolean }) {
   async function signOut() {
     await fetch("/api/me", { method: "DELETE" }).catch(() => {});
     window.location.href = "/login";
   }
 
   const initial = user?.email?.[0]?.toUpperCase() ?? "";
+  const role = user ? (user.isAdmin ? "Admin" : user.isStaff ? "CleverTap engineer" : "Customer") : "";
 
   if (!expanded)
     return (
-      <div className="flex justify-center" title={user ? `${user.email} — ${user.isStaff ? "CleverTap engineer" : "Customer"}` : undefined}>
+      <div className="flex justify-center" title={user ? `${user.email} — ${role}` : undefined}>
         <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-soft text-sm font-bold text-brand-text">
           {initial || <Icon name="user" size={16} />}
         </span>
@@ -270,7 +293,7 @@ function UserChip({ expanded }: { expanded: boolean }) {
       </span>
       <div className="min-w-0 flex-1 leading-tight">
         <div className="truncate text-sm font-semibold">{user?.email ?? "…"}</div>
-        <div className="text-xs text-muted">{user ? (user.isStaff ? "CleverTap engineer" : "Customer") : ""}</div>
+        <div className="text-xs text-muted">{role}</div>
       </div>
       {user && (
         <button onClick={signOut} className="shrink-0 rounded-lg px-1.5 py-1 text-xs font-semibold text-muted hover:text-text" title="Sign out">

@@ -10,7 +10,7 @@ const [raw, accountId, region] = process.argv.slice(2);
 
 (async () => {
   const { data } = await db().from("audits").select("owner_id, owner_email").not("owner_id", "is", null).limit(1).single();
-  const owner = { id: (data as { owner_id: string }).owner_id, email: (data as { owner_email: string }).owner_email, isStaff: true };
+  const owner = { id: (data as { owner_id: string }).owner_id, email: (data as { owner_email: string }).owner_email, isStaff: true, isAdmin: false };
   const url = await assertSafeSiteUrl(raw);
   const { id } = await createAudit({ name: "web e2e check", platform: "web", source: "url", region, accountId, siteUrl: url.href, owner, inputs: { criticalEvents: ["Product Viewed"], expectApi: false } });
   console.log("created", id);

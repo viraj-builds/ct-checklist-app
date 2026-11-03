@@ -119,11 +119,14 @@ function fail(e: { message: string } | null, what: string): never {
 
 /* ------------------------------------------------------------------ */
 
-/** Staff see every audit; everyone else only the audits they created. */
+/** Everyone (admins included) lists only the audits they created; admins see all of them on /admin. */
 export async function listAudits(user: SessionUser, limit = 100): Promise<Audit[]> {
-  let q = db().from("audits").select(LIST_COLUMNS).order("created_at", { ascending: false }).limit(limit);
-  if (!user.isStaff) q = q.eq("owner_id", user.id);
-  const { data, error } = await q;
+  const { data, error } = await db()
+    .from("audits")
+    .select(LIST_COLUMNS)
+    .eq("owner_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(limit);
   if (error) fail(error, "list audits");
   return (data as unknown as AuditRow[]).map((r) => toAudit(r, false));
 }
@@ -134,7 +137,7 @@ async function getRow(id: string): Promise<AuditRow | null> {
   return data as AuditRow | null;
 }
 
-const canAccess = (row: Pick<AuditRow, "owner_id">, user: SessionUser) => user.isStaff || row.owner_id === user.id;
+const canAccess = (row: Pick<AuditRow, "owner_id">, user: SessionUser) => user.isAdmin || row.owner_id === user.id;
 
 /**
  * Load an audit the user is allowed to see. Anything else is reported as

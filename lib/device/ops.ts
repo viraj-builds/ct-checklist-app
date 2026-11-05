@@ -66,7 +66,7 @@ export function buildCommand(op: DeviceOp): string {
       if (!/^[A-Za-z]{0,10}$/.test(op.level)) throw new Error("Invalid log level.");
       return `setprop persist.log.tag '${op.level}'`; // survives reboot — always restored
     case "setLogBuffer":
-      if (!/^\d{2,5}[KM]$/.test(op.size)) throw new Error("Invalid buffer size.");
+      if (!/^\d{1,5}[KM]$/.test(op.size)) throw new Error("Invalid buffer size.");
       return `logcat -G ${op.size}`;
     case "bgState":
       return `echo "bucket=$(am get-standby-bucket ${pkg(op.pkg)} 2>/dev/null)"; cmd appops get ${pkg(op.pkg)} RUN_ANY_IN_BACKGROUND 2>/dev/null; cmd appops get ${pkg(op.pkg)} 10008 2>/dev/null; dumpsys deviceidle whitelist 2>/dev/null | grep -qF ",${pkg(op.pkg)}," && echo whitelisted=1; true`;

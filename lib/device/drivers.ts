@@ -73,7 +73,8 @@ export async function connectWebUsb(): Promise<DeviceDriver> {
     transport: "usb",
     serial: device.serial,
     label: device.name || device.serial,
-    run: (op) => withTimeout(adb.subprocess.noneProtocol.spawnWaitText(buildCommand(op))),
+    // async so a refused op (bad size, tag, URL…) rejects like the helper's instead of throwing past .then/.catch
+    run: async (op) => withTimeout(adb.subprocess.noneProtocol.spawnWaitText(buildCommand(op))),
     close: () => adb.close(),
   };
 }

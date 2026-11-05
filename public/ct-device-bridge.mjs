@@ -177,7 +177,7 @@ function buildCommand(op) {
     case "logProbe": return `log -p v -t CTAuditProbe 'probe ${marker(op.marker)}'; log -p d -t CTAuditProbe 'probe ${marker(op.marker)}'; log -p i -t CTAuditProbe 'probe ${marker(op.marker)}'; sleep 1; logcat -d -v brief -s CTAuditProbe:V | grep -F '${marker(op.marker)}' || true`;
     case "setPersistLogTag": return `setprop persist.log.tag '${level(op.level)}'`;
     case "setLogBuffer":
-      if (typeof op.size !== "string" || !/^\d{2,5}[KM]$/.test(op.size)) throw new Error("Invalid buffer size.");
+      if (typeof op.size !== "string" || !/^\d{1,5}[KM]$/.test(op.size)) throw new Error("Invalid buffer size.");
       return `logcat -G ${op.size}`;
     case "bgState": return `echo "bucket=$(am get-standby-bucket ${pkg(op.pkg)} 2>/dev/null)"; cmd appops get ${pkg(op.pkg)} RUN_ANY_IN_BACKGROUND 2>/dev/null; cmd appops get ${pkg(op.pkg)} 10008 2>/dev/null; dumpsys deviceidle whitelist 2>/dev/null | grep -qF ",${pkg(op.pkg)}," && echo whitelisted=1; true`;
     case "screen": return "{ dumpsys power | grep -E 'mWakefulness='; dumpsys activity activities | grep -E 'mKeyguardShowing='; dumpsys window | grep -E 'mShowingLockscreen=|mDreamingLockscreen=|isKeyguardShowing='; } 2>/dev/null || true";
